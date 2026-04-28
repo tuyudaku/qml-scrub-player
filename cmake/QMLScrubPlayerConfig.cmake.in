@@ -15,6 +15,22 @@ if(PkgConfig_FOUND)
 endif()
 
 if(NOT TARGET PkgConfig::FFMPEG)
+    find_package(FFMPEG QUIET COMPONENTS avformat avcodec avutil swscale swresample)
+    if(TARGET FFMPEG::avformat AND TARGET FFMPEG::avcodec AND TARGET FFMPEG::avutil
+        AND TARGET FFMPEG::swscale AND TARGET FFMPEG::swresample)
+        add_library(QMLScrubPlayerFFmpeg INTERFACE)
+        add_library(PkgConfig::FFMPEG ALIAS QMLScrubPlayerFFmpeg)
+        target_link_libraries(QMLScrubPlayerFFmpeg INTERFACE
+            FFMPEG::avformat
+            FFMPEG::avcodec
+            FFMPEG::avutil
+            FFMPEG::swscale
+            FFMPEG::swresample
+        )
+    endif()
+endif()
+
+if(NOT TARGET PkgConfig::FFMPEG)
     find_path(FFMPEG_INCLUDE_DIR
         NAMES libavformat/avformat.h
         HINTS "${FFMPEG_ROOT}/include"

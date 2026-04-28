@@ -24,15 +24,27 @@ FFmpeg で動画をデコードし、Qt Quick には `QVideoSink` 経由でフ�
 
 - Qt 6.10 以降
 - CMake 3.21 以降
-- FFmpeg 開発ライブラリ
-  - `libavformat`
-  - `libavcodec`
-  - `libavutil`
-  - `libswscale`
-  - `libswresample`
-- `pkg-config`、または FFmpeg の `include/` と `lib/` を含む `FFMPEG_ROOT`
+- 付属の CMake preset を使う場合は Ninja
+- vcpkg preset を使う場合、FFmpeg 開発ライブラリは vcpkg manifest mode で自動導入
+
+Qt は vcpkg manifest には含めていません。Qt 公式インストーラーや任意の方法で Qt を
+インストールし、`CMAKE_PREFIX_PATH` で Qt のパスを指定してください。
 
 ## ビルド
+
+### vcpkg manifest mode を使う場合
+
+vcpkg をインストールし、`VCPKG_ROOT` を設定してから付属 preset で configure します。
+
+```sh
+cmake --preset vcpkg -DCMAKE_PREFIX_PATH=/path/to/Qt/6.10/<platform>
+cmake --build --preset vcpkg
+```
+
+FFmpeg は `vcpkg.json` をもとに自動で導入されます。Windows や、ローカルに FFmpeg
+開発環境を用意したくない場合はこちらを推奨します。
+
+### システムに入っている FFmpeg を使う場合
 
 ```sh
 cmake -S . -B build -DCMAKE_PREFIX_PATH=/path/to/Qt/6.x/<platform>
@@ -47,8 +59,8 @@ cmake --build build
 ```
 
 Homebrew で FFmpeg を入れている場合は、通常 `pkg-config` で自動検出されます。
-Windows では vcpkg などのパッケージマネージャーを使うか、`FFMPEG_ROOT` に
-FFmpeg の `include/` と `lib/` を含むディレクトリを指定してください。
+vcpkg や pkg-config を使わない場合は、`FFMPEG_ROOT` に FFmpeg の `include/` と
+`lib/` を含むディレクトリを指定してください。
 
 ## サンプルアプリ
 

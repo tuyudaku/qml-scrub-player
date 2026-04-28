@@ -27,15 +27,30 @@ using `VideoOutput` while the C++ side owns low-latency seek and decode control.
 
 - Qt 6.10 or newer
 - CMake 3.21 or newer
-- FFmpeg development libraries:
-  - `libavformat`
-  - `libavcodec`
-  - `libavutil`
-  - `libswscale`
-  - `libswresample`
-- `pkg-config` or an `FFMPEG_ROOT` path with FFmpeg `include/` and `lib/`
+- Ninja, when using the provided CMake preset
+- FFmpeg development libraries, provided automatically by vcpkg manifest mode
+  when using the vcpkg preset
+
+Qt is intentionally not part of the vcpkg manifest. Install Qt with the Qt
+installer or your preferred package manager, then pass its path through
+`CMAKE_PREFIX_PATH`.
 
 ## Build
+
+### With vcpkg manifest mode
+
+Install vcpkg, set `VCPKG_ROOT`, and configure with the bundled preset:
+
+```sh
+cmake --preset vcpkg -DCMAKE_PREFIX_PATH=/path/to/Qt/6.10/<platform>
+cmake --build --preset vcpkg
+```
+
+vcpkg will install FFmpeg from `vcpkg.json` automatically. This is the
+recommended route for Windows and for users who do not already have FFmpeg
+development libraries installed.
+
+### With system FFmpeg
 
 ```sh
 cmake -S . -B build -DCMAKE_PREFIX_PATH=/path/to/Qt/6.x/<platform>
@@ -50,8 +65,8 @@ cmake --build build
 ```
 
 If FFmpeg was installed through Homebrew, `pkg-config` should find it
-automatically. On Windows, use a package manager such as vcpkg or set
-`FFMPEG_ROOT` to a directory that contains `include/` and `lib/`.
+automatically. If you are not using vcpkg or pkg-config, set `FFMPEG_ROOT` to a
+directory that contains FFmpeg `include/` and `lib/`.
 
 ## Run The Example
 

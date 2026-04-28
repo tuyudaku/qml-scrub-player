@@ -1,0 +1,20 @@
+{
+  "name": "qmlscrubplayer",
+  "version-string": "0.1.0",
+  "description": "A Qt 6 QML video player module with fast scrubbing, FFmpeg decoding, and QAudioSink output.",
+  "homepage": "https://github.com/yourname/QMLScrubPlayer",
+  "license": "MIT",
+  "dependencies": [
+    {
+      "name": "ffmpeg",
+      "default-features": false,
+      "features": [
+        "avcodec",
+        "avformat",
+        "avutil",
+        "swresample",
+        "swscale"
+      ]
+    }
+  ]
+}

@@ -18,6 +18,7 @@ include(CMakePackageConfigHelpers)
 find_package(PkgConfig)
 
 find_package(Qt6 6.10 REQUIRED COMPONENTS Core Qml Quick Multimedia)
+
 if(PkgConfig_FOUND)
     pkg_check_modules(FFMPEG IMPORTED_TARGET
         libavformat
@@ -26,6 +27,22 @@ if(PkgConfig_FOUND)
         libswscale
         libswresample
     )
+endif()
+
+if(NOT TARGET PkgConfig::FFMPEG)
+    find_package(FFMPEG QUIET COMPONENTS avformat avcodec avutil swscale swresample)
+    if(TARGET FFMPEG::avformat AND TARGET FFMPEG::avcodec AND TARGET FFMPEG::avutil
+        AND TARGET FFMPEG::swscale AND TARGET FFMPEG::swresample)
+        add_library(QMLScrubPlayerFFmpeg INTERFACE)
+        add_library(PkgConfig::FFMPEG ALIAS QMLScrubPlayerFFmpeg)
+        target_link_libraries(QMLScrubPlayerFFmpeg INTERFACE
+            FFMPEG::avformat
+            FFMPEG::avcodec
+            FFMPEG::avutil
+            FFMPEG::swscale
+            FFMPEG::swresample
+        )
+    endif()
 endif()
 
 if(NOT TARGET PkgConfig::FFMPEG)
