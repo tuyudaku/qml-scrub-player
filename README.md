@@ -1,0 +1,154 @@
+# QMLScrubPlayer
+
+QMLScrubPlayer is a small Qt 6.10 module for QML video playback. It decodes video
+with FFmpeg and presents frames to Qt Quick through `QVideoSink`, so QML can keep
+using `VideoOutput` while the C++ side owns low-latency seek and decode control.
+
+## Features
+
+- QML type: `QmlScrubPlayer`
+- FFmpeg-backed video decoding
+- FFmpeg-backed audio decoding with `QAudioSink` output
+- `VideoOutput` integration through `player.videoSink`
+- Playback controls: `play()`, `pause()`, `stop()`, `seek(position)`
+- Scrubbing control: `previewSeek(position)` for lightweight keyframe previews
+- Properties for `source`, `playing`, `duration`, `position`, `volume`, `muted`,
+  `loops`, `playbackRate`, `status`, and `errorString`
+- Decoder-thread seeking with `av_seek_frame()` and codec buffer flush
+- Dedicated preview decoder for scrub-bar dragging
+- Keyframe-index assisted preview seeking
+- Hardware decode where FFmpeg supports it:
+  - macOS: VideoToolbox
+  - Windows: D3D11VA, with DXVA2 fallback
+- CMake install/export support for GitHub distribution
+- Minimal QML example app
+
+## Requirements
+
+- Qt 6.10 or newer
+- CMake 3.21 or newer
+- FFmpeg development libraries:
+  - `libavformat`
+  - `libavcodec`
+  - `libavutil`
+  - `libswscale`
+  - `libswresample`
+- `pkg-config` or an `FFMPEG_ROOT` path with FFmpeg `include/` and `lib/`
+
+## Build
+
+```sh
+cmake -S . -B build -DCMAKE_PREFIX_PATH=/path/to/Qt/6.x/<platform>
+cmake --build build
+```
+
+On macOS with a default Qt installer layout, for example:
+
+```sh
+cmake -S . -B build -DCMAKE_PREFIX_PATH=$HOME/Qt/6.10.2/macos
+cmake --build build
+```
+
+If FFmpeg was installed through Homebrew, `pkg-config` should find it
+automatically. On Windows, use a package manager such as vcpkg or set
+`FFMPEG_ROOT` to a directory that contains `include/` and `lib/`.
+
+## Run The Example
+
+```sh
+cmake --build build --target qmlscrubplayer_basic
+./build/examples/basic/qmlscrubplayer_basic
+```
+
+Run the generated `qmlscrubplayer_basic` executable from the corresponding build
+directory.
+
+## Use From QML
+
+```qml
+import QtQuick
+import QtMultimedia
+import QMLScrubPlayer
+
+QmlScrubPlayer {
+    id: player
+    source: "file:///path/to/movie.mp4"
+    autoPlay: true
+    videoSink: output.videoSink
+}
+
+VideoOutput {
+    id: output
+    anchors.fill: parent
+    fillMode: VideoOutput.PreserveAspectFit
+}
+```
+
+For responsive scrub bars, call `previewSeek(position)` while dragging and
+`endPreviewSeek(position)` when the user releases the handle.
+
+## Install
+
+```sh
+cmake --install build --prefix /path/to/install
+```
+
+Consumer projects can then use:
+
+```cmake
+find_package(QMLScrubPlayer CONFIG REQUIRED)
+target_link_libraries(my_app PRIVATE QMLScrubPlayer::QMLScrubPlayer)
+```
+
+Make sure the installed QML import path is available to your application at
+runtime. During development, adding the install prefix's QML directory to
+`QML_IMPORT_PATH` is usually enough.
+
+## Use From C++
+
+`QmlScrubPlayer` is also a public C++ class. You can create it directly, read
+playback state, and connect to Qt signals.
+
+```cpp
+#include <qmlscrubplayer.h>
+
+auto *player = new QmlScrubPlayer(this);
+player->setSource(QUrl::fromLocalFile("/path/to/movie.mp4"));
+
+connect(player, &QmlScrubPlayer::durationChanged, this, [player] {
+    qDebug() << "duration ms:" << player->duration();
+});
+
+connect(player, &QmlScrubPlayer::positionChanged, this, [player] {
+    qDebug() << "position ms:" << player->position();
+});
+
+connect(player, &QmlScrubPlayer::statusChanged, this, [player] {
+    qDebug() << "status:" << static_cast<int>(player->status());
+});
+
+player->play();
+```
+
+Available C++ state includes `source()`, `isPlaying()`, `duration()`,
+`position()`, `volume()`, `isMuted()`, `status()`, and `errorString()`. The same
+control methods used from QML are available from C++: `play()`, `pause()`,
+`stop()`, `seek()`, `previewSeek()`, and `endPreviewSeek()`.
+
+## Notes
+
+QMLScrubPlayer decodes audio through FFmpeg, resamples it with libswresample, and
+outputs it with `QAudioSink`. Audio is currently tied to normal playback; scrub
+preview decoding remains video-only.
+
+## Repository Layout
+
+```text
+src/              QMLScrubPlayer QML module
+examples/basic/   Minimal QML video player example
+cmake/            Package config template
+```
+
+## License
+
+MIT

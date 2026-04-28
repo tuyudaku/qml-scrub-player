@@ -1,0 +1,6 @@
+build*/
+.DS_Store
+*.user
+*.qmlc
+*.jsc
+CMakeUserPresets.json
