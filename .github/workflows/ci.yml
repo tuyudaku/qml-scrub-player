@@ -43,7 +43,7 @@ jobs:
           fi
 
       - name: Configure
-        run: cmake --preset vcpkg -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR}"
+        run: cmake --preset vcpkg -G Ninja -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR}"
 
       - name: Build
         run: cmake --build --preset vcpkg --parallel
