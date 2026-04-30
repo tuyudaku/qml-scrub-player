@@ -69,6 +69,13 @@ cmake --build build --target qmlscrubplayer_basic
 ./build/examples/basic/qmlscrubplayer_basic
 ```
 
+## テスト
+
+```sh
+cmake --build build --target qmlscrubplayer_tests
+ctest --test-dir build --output-on-failure
+```
+
 ## QML での使い方
 
 ```qml
