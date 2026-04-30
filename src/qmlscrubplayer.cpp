@@ -2,6 +2,7 @@
 
 #include <QAudioFormat>
 #include <QAudioSink>
+#include <QCache>
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QFileInfo>
@@ -9,6 +10,8 @@
 #include <QIODevice>
 #include <QMutex>
 #include <QMutexLocker>
+#include <QSize>
+#include <QString>
 #include <QThread>
 #include <QVector>
 #include <QVideoFrame>
@@ -18,6 +21,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <memory>
 
 extern "C" {
@@ -61,6 +65,8 @@ struct SwrDeleter
 using SwrContextPtr = std::unique_ptr<SwrContext, SwrDeleter>;
 
 constexpr int defaultSeekPreviewMaximumDimension = 4096;
+constexpr qint64 fallbackFrameStepMs = 40;
+constexpr int previewFrameCacheLimit = 64;
 
 struct HardwareDecoder
 {
@@ -134,6 +140,98 @@ qint64 formatDurationToMs(const AVFormatContext *format)
     }
 
     return durationMs;
+}
+
+qreal streamFrameRate(const AVStream *stream)
+{
+    if (!stream) {
+        return 0.0;
+    }
+
+    AVRational rate = stream->avg_frame_rate;
+    if (rate.num <= 0 || rate.den <= 0) {
+        rate = stream->r_frame_rate;
+    }
+    if (rate.num <= 0 || rate.den <= 0) {
+        return 0.0;
+    }
+
+    return av_q2d(rate);
+}
+
+qint64 streamFrameCount(const AVStream *stream, qint64 fallbackDurationMs)
+{
+    if (!stream) {
+        return 0;
+    }
+
+    if (stream->nb_frames > 0) {
+        return stream->nb_frames;
+    }
+
+    const qreal frameRate = streamFrameRate(stream);
+    qint64 durationMs = streamDurationToMs(stream);
+    if (durationMs <= 0) {
+        durationMs = fallbackDurationMs;
+    }
+    if (frameRate <= 0.0 || durationMs <= 0) {
+        return 0;
+    }
+
+    return std::max<qint64>(0, static_cast<qint64>(std::llround(durationMs * frameRate / 1000.0)));
+}
+
+bool formatIsSeekable(const AVFormatContext *format)
+{
+    return format && format->pb && (format->pb->seekable & AVIO_SEEKABLE_NORMAL);
+}
+
+int audioChannelCount(const AVStream *stream)
+{
+    if (!stream || !stream->codecpar) {
+        return 0;
+    }
+
+    return std::max(0, stream->codecpar->ch_layout.nb_channels);
+}
+
+int audioSampleRate(const AVStream *stream)
+{
+    if (!stream || !stream->codecpar) {
+        return 0;
+    }
+
+    return std::max(0, stream->codecpar->sample_rate);
+}
+
+QString codecName(const AVStream *stream)
+{
+    if (!stream || !stream->codecpar) {
+        return {};
+    }
+
+    const char *name = avcodec_get_name(stream->codecpar->codec_id);
+    return name ? QString::fromLatin1(name) : QString();
+}
+
+QString pixelFormatName(const AVStream *stream)
+{
+    if (!stream || !stream->codecpar || stream->codecpar->format < 0) {
+        return {};
+    }
+
+    const char *name = av_get_pix_fmt_name(static_cast<AVPixelFormat>(stream->codecpar->format));
+    return name ? QString::fromLatin1(name) : QString();
+}
+
+QString audioFormatName(const AVStream *stream)
+{
+    if (!stream || !stream->codecpar || stream->codecpar->format < 0) {
+        return {};
+    }
+
+    const char *name = av_get_sample_fmt_name(static_cast<AVSampleFormat>(stream->codecpar->format));
+    return name ? QString::fromLatin1(name) : QString();
 }
 
 QVector<AVHWDeviceType> preferredHardwareDeviceTypes()
@@ -321,8 +419,19 @@ public:
         m_seekPreviewMaximumDimension = std::max(64, seekPreviewMaximumDimension);
     }
 
+    void setLoopRange(qint64 loopStart, qint64 loopEnd)
+    {
+        QMutexLocker locker(&m_mutex);
+        m_loopStart = std::max<qint64>(0, loopStart);
+        m_loopEnd = std::max<qint64>(0, loopEnd);
+    }
+
 signals:
     void durationReady(qint64 duration);
+    void mediaInfoReady(const QSize &videoSize, qreal frameRate, qint64 frameCount,
+        const QString &videoCodecName, const QString &audioCodecName,
+        const QString &pixelFormat, const QString &audioFormat,
+        bool seekable, bool hasAudio, int audioChannelCount, int audioSampleRate, bool hasVideo);
     void frameReady(const QImage &image, qint64 position, qint64 generation);
     void statusReady(QmlScrubPlayer::Status status);
     void errorReady(const QString &message);
@@ -386,7 +495,13 @@ protected:
             return;
         }
 
+        const qint64 durationMs = formatDurationToMs(format.get());
         const int audioStream = av_find_best_stream(format.get(), AVMEDIA_TYPE_AUDIO, -1, videoStream, nullptr, 0);
+        const AVStream *audioAvStream = audioStream >= 0 ? format->streams[audioStream] : nullptr;
+        emit mediaInfoReady(QSize(stream->codecpar->width, stream->codecpar->height), streamFrameRate(stream), streamFrameCount(stream, durationMs),
+            codecName(stream), codecName(audioAvStream), pixelFormatName(stream), audioFormatName(audioAvStream),
+            formatIsSeekable(format.get()), audioStream >= 0, audioChannelCount(audioAvStream), audioSampleRate(audioAvStream), true);
+
         CodecContextPtr audioCodecContext;
         SwrContextPtr resampler;
         std::unique_ptr<QAudioSink> audioSink;
@@ -417,7 +532,7 @@ protected:
             audioFrame.reset();
         }
 
-        emit durationReady(formatDurationToMs(format.get()));
+        emit durationReady(durationMs);
         emit statusReady(QmlScrubPlayer::Status::Loaded);
 
         PacketPtr packet(av_packet_alloc());
@@ -541,6 +656,23 @@ protected:
                 dropFramesBefore = -1;
                 previewFirstFrameAfterSeek = false;
 
+                qint64 loopStart = 0;
+                qint64 loopEnd = 0;
+                currentLoopRange(loopStart, loopEnd);
+                if (loopEnd > loopStart && framePosition >= loopEnd && shouldLoop(++completedLoops)) {
+                    seekTo(format.get(), codecContext.get(), stream, loopStart, SeekMode::Exact);
+                    if (audioCodecContext) {
+                        avcodec_flush_buffers(audioCodecContext.get());
+                    }
+                    if (audioSink) {
+                        audioSink->reset();
+                        audioDevice = audioSink->start();
+                    }
+                    clockValid = false;
+                    av_frame_unref(frame.get());
+                    break;
+                }
+
                 if (!previewFrame) {
                     throttleFrame(framePosition, clock, clockStartPosition, clockValid);
                 }
@@ -593,6 +725,13 @@ private:
     {
         QMutexLocker locker(&m_mutex);
         return m_seekPending;
+    }
+
+    void currentLoopRange(qint64 &loopStart, qint64 &loopEnd)
+    {
+        QMutexLocker locker(&m_mutex);
+        loopStart = m_loopStart;
+        loopEnd = m_loopEnd;
     }
 
     bool consumeSeek(AVFormatContext *format, AVCodecContext *codecContext, AVCodecContext *audioCodecContext,
@@ -876,6 +1015,8 @@ private:
     bool m_muted = false;
     bool m_audioSuppressed = false;
     int m_seekPreviewMaximumDimension = defaultSeekPreviewMaximumDimension;
+    qint64 m_loopStart = 0;
+    qint64 m_loopEnd = 0;
 };
 
 class QmlScrubPreviewDecoder : public QThread
@@ -1216,8 +1357,11 @@ void QmlScrubPlayer::setSource(const QUrl &source)
     setPositionFromDecoder(0);
     m_expectedFrameGeneration = 0;
     m_frameGenerationCounter = 0;
+    m_currentFrameImage = QImage();
+    m_previewFrameCache.clear();
     setDuration(0);
-    setErrorString(QString());
+    resetMediaInfo();
+    setError(Error::NoError, QString());
     setStatus(source.isEmpty() ? Status::NoMedia : Status::Loading);
     recreateDecoder();
 
@@ -1259,6 +1403,119 @@ qint64 QmlScrubPlayer::position() const
 void QmlScrubPlayer::setPosition(qint64 position)
 {
     seek(position);
+}
+
+qint64 QmlScrubPlayer::remainingTime() const
+{
+    return std::max<qint64>(0, m_duration - m_position);
+}
+
+qreal QmlScrubPlayer::progress() const
+{
+    if (m_duration <= 0) {
+        return 0.0;
+    }
+
+    return std::clamp(static_cast<qreal>(m_position) / m_duration, 0.0, 1.0);
+}
+
+QString QmlScrubPlayer::timecode() const
+{
+    return formatTimecode(m_position);
+}
+
+QString QmlScrubPlayer::durationTimecode() const
+{
+    return formatTimecode(m_duration);
+}
+
+qint64 QmlScrubPlayer::currentFrame() const
+{
+    return positionToFrame(m_position);
+}
+
+qint64 QmlScrubPlayer::frameCount() const
+{
+    return m_frameCount;
+}
+
+QSize QmlScrubPlayer::videoSize() const
+{
+    return m_videoSize;
+}
+
+qreal QmlScrubPlayer::aspectRatio() const
+{
+    if (m_videoSize.width() <= 0 || m_videoSize.height() <= 0) {
+        return 0.0;
+    }
+
+    return static_cast<qreal>(m_videoSize.width()) / m_videoSize.height();
+}
+
+qreal QmlScrubPlayer::frameRate() const
+{
+    return m_frameRate;
+}
+
+QString QmlScrubPlayer::videoCodecName() const
+{
+    return m_videoCodecName;
+}
+
+QString QmlScrubPlayer::audioCodecName() const
+{
+    return m_audioCodecName;
+}
+
+QString QmlScrubPlayer::pixelFormat() const
+{
+    return m_pixelFormat;
+}
+
+QString QmlScrubPlayer::audioFormat() const
+{
+    return m_audioFormat;
+}
+
+bool QmlScrubPlayer::hasAudio() const
+{
+    return m_hasAudio;
+}
+
+int QmlScrubPlayer::audioChannelCount() const
+{
+    return m_audioChannelCount;
+}
+
+int QmlScrubPlayer::audioSampleRate() const
+{
+    return m_audioSampleRate;
+}
+
+bool QmlScrubPlayer::isSeekable() const
+{
+    return m_seekable;
+}
+
+bool QmlScrubPlayer::hasVideo() const
+{
+    return m_hasVideo;
+}
+
+bool QmlScrubPlayer::canPlay() const
+{
+    return !m_source.isEmpty() && m_status != Status::InvalidMedia && !m_playing;
+}
+
+bool QmlScrubPlayer::canPause() const
+{
+    return m_playing;
+}
+
+bool QmlScrubPlayer::canSeek() const
+{
+    return m_seekable && m_duration > 0;
 }
 
 float QmlScrubPlayer::volume() const
@@ -1316,6 +1573,50 @@ void QmlScrubPlayer::setLoops(int loops)
     emit loopsChanged();
 }
 
+qint64 QmlScrubPlayer::loopStart() const
+{
+    return m_loopStart;
+}
+
+void QmlScrubPlayer::setLoopStart(qint64 loopStart)
+{
+    const qint64 clampedLoopStart = clampPosition(loopStart);
+    if (m_loopStart == clampedLoopStart) {
+        return;
+    }
+
+    m_loopStart = clampedLoopStart;
+    if (m_loopEnd > 0 && m_loopEnd <= m_loopStart) {
+        m_loopEnd = 0;
+    }
+    if (m_decoder) {
+        m_decoder->setLoopRange(m_loopStart, m_loopEnd);
+    }
+    emit loopRangeChanged();
+}
+
+qint64 QmlScrubPlayer::loopEnd() const
+{
+    return m_loopEnd;
+}
+
+void QmlScrubPlayer::setLoopEnd(qint64 loopEnd)
+{
+    qint64 clampedLoopEnd = loopEnd <= 0 ? 0 : clampPosition(loopEnd);
+    if (clampedLoopEnd > 0 && clampedLoopEnd <= m_loopStart) {
+        clampedLoopEnd = 0;
+    }
+    if (m_loopEnd == clampedLoopEnd) {
+        return;
+    }
+
+    m_loopEnd = clampedLoopEnd;
+    if (m_decoder) {
+        m_decoder->setLoopRange(m_loopStart, m_loopEnd);
+    }
+    emit loopRangeChanged();
+}
+
 qreal QmlScrubPlayer::playbackRate() const
 {
     return m_playbackRate;
@@ -1357,9 +1658,19 @@ void QmlScrubPlayer::setSeekPreviewMaximumDimension(int seekPreviewMaximumDimens
     emit seekPreviewMaximumDimensionChanged();
 }
 
+QmlScrubPlayer::PlaybackState QmlScrubPlayer::playbackState() const
+{
+    return m_playbackState;
+}
+
 QmlScrubPlayer::Status QmlScrubPlayer::status() const
 {
     return m_status;
+}
+
+QmlScrubPlayer::Error QmlScrubPlayer::error() const
+{
+    return m_error;
 }
 
 QString QmlScrubPlayer::errorString() const
@@ -1385,7 +1696,10 @@ void QmlScrubPlayer::setVideoSink(QVideoSink *videoSink)
 
 void QmlScrubPlayer::play()
 {
-    if (m_source.isEmpty()) {
+    if (!canPlay() && m_playing) {
+        return;
+    }
+    if (m_source.isEmpty() || m_status == Status::InvalidMedia) {
         return;
     }
 
@@ -1408,6 +1722,9 @@ void QmlScrubPlayer::pause()
 void QmlScrubPlayer::stop()
 {
     setPlaying(false);
+    m_playbackState = PlaybackState::Stopped;
+    emit playbackStateChanged();
+    emitPlaybackDerivedSignals();
     seek(0);
     if (m_decoder) {
         m_decoder->setPlaying(false);
@@ -1416,7 +1733,7 @@ void QmlScrubPlayer::stop()
 
 void QmlScrubPlayer::seek(qint64 position)
 {
-    const qint64 clampedPosition = std::clamp<qint64>(position, 0, m_duration > 0 ? m_duration : position);
+    const qint64 clampedPosition = clampPosition(position);
     setPositionFromDecoder(clampedPosition);
     if (!m_decoder) {
         recreateDecoder();
@@ -1429,10 +1746,21 @@ void QmlScrubPlayer::seek(qint64 position)
     }
 }
 
+void QmlScrubPlayer::seekToFrame(qint64 frame)
+{
+    seek(frameToPosition(frame));
+}
+
 void QmlScrubPlayer::previewSeek(qint64 position)
 {
-    const qint64 clampedPosition = std::clamp<qint64>(position, 0, m_duration > 0 ? m_duration : position);
+    const qint64 clampedPosition = clampPosition(position);
     setPositionFromDecoder(clampedPosition);
+    if (const auto cached = m_previewFrameCache.constFind(clampedPosition); cached != m_previewFrameCache.constEnd()) {
+        m_currentFrameImage = *cached;
+        if (m_videoSink) {
+            m_videoSink->setVideoFrame(QVideoFrame(m_currentFrameImage));
+        }
+    }
     if (!m_previewDecoder) {
         recreateDecoder();
     }
@@ -1447,9 +1775,54 @@ void QmlScrubPlayer::previewSeek(qint64 position)
     }
 }
 
+void QmlScrubPlayer::previewSeekToFrame(qint64 frame)
+{
+    previewSeek(frameToPosition(frame));
+}
+
 void QmlScrubPlayer::endPreviewSeek(qint64 position)
 {
     seek(position);
+}
+
+void QmlScrubPlayer::endPreviewSeekToFrame(qint64 frame)
+{
+    endPreviewSeek(frameToPosition(frame));
+}
+
+void QmlScrubPlayer::stepForward(int frames)
+{
+    seek(m_position + frameStepDuration() * std::max(1, frames));
+}
+
+void QmlScrubPlayer::stepBackward(int frames)
+{
+    seek(m_position - frameStepDuration() * std::max(1, frames));
+}
+
+qint64 QmlScrubPlayer::positionForFrame(qint64 frame) const
+{
+    return frameToPosition(frame);
+}
+
+qint64 QmlScrubPlayer::frameForPosition(qint64 position) const
+{
+    return positionToFrame(position);
+}
+
+QString QmlScrubPlayer::timecodeForFrame(qint64 frame) const
+{
+    return formatTimecode(frameToPosition(frame));
+}
+
+QString QmlScrubPlayer::timecodeForPosition(qint64 position) const
+{
+    return formatTimecode(position);
+}
+
+QImage QmlScrubPlayer::captureFrame() const
+{
+    return m_currentFrameImage;
 }
 
 void QmlScrubPlayer::recreateDecoder()
@@ -1479,18 +1852,24 @@ void QmlScrubPlayer::recreateDecoder()
     m_decoder->setVolume(m_volume);
     m_decoder->setMuted(m_muted);
     m_decoder->setSeekPreviewMaximumDimension(m_seekPreviewMaximumDimension);
+    m_decoder->setLoopRange(m_loopStart, m_loopEnd);
 
     connect(m_decoder, &QmlScrubDecoder::durationReady, this, &QmlScrubPlayer::setDuration);
+    connect(m_decoder, &QmlScrubDecoder::mediaInfoReady, this, &QmlScrubPlayer::setMediaInfo);
     connect(m_decoder, &QmlScrubDecoder::statusReady, this, &QmlScrubPlayer::setStatus);
     connect(m_decoder, &QmlScrubDecoder::errorReady, this, &QmlScrubPlayer::setErrorString);
     connect(m_decoder, &QmlScrubDecoder::playbackEnded, this, [this] {
         setPlaying(false);
+        m_playbackState = PlaybackState::Stopped;
+        emit playbackStateChanged();
+        emitPlaybackDerivedSignals();
     });
     connect(m_decoder, &QmlScrubDecoder::frameReady, this, [this](const QImage &image, qint64 position, qint64 generation) {
         if (generation < m_expectedFrameGeneration) {
             return;
         }
         setPositionFromDecoder(position);
+        m_currentFrameImage = image;
         if (m_videoSink) {
             m_videoSink->setVideoFrame(QVideoFrame(image));
         }
@@ -1507,6 +1886,11 @@ void QmlScrubPlayer::recreateDecoder()
             return;
         }
         setPositionFromDecoder(position);
+        m_currentFrameImage = image;
+        if (m_previewFrameCache.size() >= previewFrameCacheLimit) {
+            m_previewFrameCache.erase(m_previewFrameCache.begin());
+        }
+        m_previewFrameCache.insert(position, image);
         if (m_videoSink) {
             m_videoSink->setVideoFrame(QVideoFrame(image));
         }
@@ -1521,7 +1905,14 @@ void QmlScrubPlayer::setPlaying(bool playing)
     }
 
     m_playing = playing;
+    const PlaybackState nextPlaybackState = playing ? PlaybackState::Playing
+        : (m_playbackState == PlaybackState::Stopped ? PlaybackState::Stopped : PlaybackState::Paused);
     emit playingChanged();
+    if (m_playbackState != nextPlaybackState) {
+        m_playbackState = nextPlaybackState;
+        emit playbackStateChanged();
+    }
+    emitPlaybackDerivedSignals();
 }
 
 void QmlScrubPlayer::setDuration(qint64 duration)
@@ -1532,16 +1923,121 @@ void QmlScrubPlayer::setDuration(qint64 duration)
 
     m_duration = duration;
     emit durationChanged();
+    emit timelineChanged();
+    emitPlaybackDerivedSignals();
 }
 
 void QmlScrubPlayer::setPositionFromDecoder(qint64 position)
 {
+    const qint64 previousFrame = currentFrame();
     if (m_position == position) {
         return;
     }
 
     m_position = position;
     emit positionChanged();
+    emit timelineChanged();
+    if (currentFrame() != previousFrame) {
+        emit currentFrameChanged();
+    }
+}
+
+void QmlScrubPlayer::setMediaInfo(const QSize &videoSize, qreal frameRate, qint64 frameCount,
+    const QString &videoCodecName, const QString &audioCodecName, const QString &pixelFormat, const QString &audioFormat,
+    bool seekable, bool hasAudio, int audioChannelCount, int audioSampleRate, bool hasVideo)
+{
+    const qint64 previousFrame = currentFrame();
+    const qint64 clampedFrameCount = std::max<qint64>(0, frameCount);
+    const int clampedAudioChannelCount = std::max(0, audioChannelCount);
+    const int clampedAudioSampleRate = std::max(0, audioSampleRate);
+    if (m_videoSize == videoSize && qFuzzyCompare(m_frameRate, frameRate) && m_frameCount == clampedFrameCount
+        && m_videoCodecName == videoCodecName && m_audioCodecName == audioCodecName && m_pixelFormat == pixelFormat && m_audioFormat == audioFormat
+        && m_seekable == seekable && m_hasAudio == hasAudio && m_audioChannelCount == clampedAudioChannelCount
+        && m_audioSampleRate == clampedAudioSampleRate && m_hasVideo == hasVideo) {
+        return;
+    }
+
+    m_videoSize = videoSize;
+    m_frameRate = frameRate;
+    m_frameCount = clampedFrameCount;
+    m_videoCodecName = videoCodecName;
+    m_audioCodecName = audioCodecName;
+    m_pixelFormat = pixelFormat;
+    m_audioFormat = audioFormat;
+    m_seekable = seekable;
+    m_hasAudio = hasAudio;
+    m_audioChannelCount = clampedAudioChannelCount;
+    m_audioSampleRate = clampedAudioSampleRate;
+    m_hasVideo = hasVideo;
+    emit mediaInfoChanged();
+    emitPlaybackDerivedSignals();
+    if (currentFrame() != previousFrame) {
+        emit currentFrameChanged();
+    }
+}
+
+void QmlScrubPlayer::resetMediaInfo()
+{
+    setMediaInfo(QSize(), 0.0, 0, QString(), QString(), QString(), QString(), false, false, 0, 0, false);
+}
+
+qint64 QmlScrubPlayer::frameStepDuration() const
+{
+    if (m_frameRate <= 0.0) {
+        return fallbackFrameStepMs;
+    }
+
+    return std::max<qint64>(1, static_cast<qint64>(std::llround(1000.0 / m_frameRate)));
+}
+
+qint64 QmlScrubPlayer::frameToPosition(qint64 frame) const
+{
+    qint64 clampedFrame = std::max<qint64>(0, frame);
+    if (m_frameCount > 0) {
+        clampedFrame = std::min(clampedFrame, m_frameCount - 1);
+    }
+    if (m_frameRate <= 0.0) {
+        return clampedFrame * fallbackFrameStepMs;
+    }
+
+    return static_cast<qint64>(std::llround(clampedFrame * 1000.0 / m_frameRate));
+}
+
+qint64 QmlScrubPlayer::positionToFrame(qint64 position) const
+{
+    const qint64 clampedPosition = std::max<qint64>(0, position);
+    qint64 frame = 0;
+    if (m_frameRate <= 0.0) {
+        frame = clampedPosition / fallbackFrameStepMs;
+    } else {
+        frame = static_cast<qint64>(std::floor(clampedPosition * m_frameRate / 1000.0));
+    }
+
+    if (m_frameCount > 0) {
+        return std::min(frame, m_frameCount - 1);
+    }
+
+    return frame;
+}
+
+qint64 QmlScrubPlayer::clampPosition(qint64 position) const
+{
+    return std::clamp<qint64>(position, 0, m_duration > 0 ? m_duration : std::max<qint64>(0, position));
+}
+
+QString QmlScrubPlayer::formatTimecode(qint64 position) const
+{
+    const qint64 clampedPosition = clampPosition(position);
+    const qint64 totalSeconds = clampedPosition / 1000;
+    const qint64 hours = totalSeconds / 3600;
+    const qint64 minutes = (totalSeconds / 60) % 60;
+    const qint64 seconds = totalSeconds % 60;
+    const qint64 frame = positionToFrame(clampedPosition) - positionToFrame(totalSeconds * 1000);
+    return QStringLiteral("%1:%2:%3:%4")
+        .arg(hours, 2, 10, QLatin1Char('0'))
+        .arg(minutes, 2, 10, QLatin1Char('0'))
+        .arg(seconds, 2, 10, QLatin1Char('0'))
+        .arg(std::max<qint64>(0, frame), 2, 10, QLatin1Char('0'));
 }
 
 void QmlScrubPlayer::setStatus(Status status)
@@ -1552,16 +2048,28 @@ void QmlScrubPlayer::setStatus(Status status)
 
     m_status = status;
     emit statusChanged();
+    emitPlaybackDerivedSignals();
+}
+
+void QmlScrubPlayer::setError(Error error, const QString &errorString)
+{
+    if (m_error == error && m_errorString == errorString) {
+        return;
+    }
+
+    m_error = error;
+    m_errorString = errorString;
+    emit errorChanged();
 }
 
 void QmlScrubPlayer::setErrorString(const QString &errorString)
 {
-    if (m_errorString == errorString) {
-        return;
-    }
+    setError(errorString.isEmpty() ? Error::NoError : Error::InvalidMedia, errorString);
+}
 
-    m_errorString = errorString;
-    emit errorChanged();
+void QmlScrubPlayer::emitPlaybackDerivedSignals()
+{
+    emit playbackCapabilitiesChanged();
 }
 
 #include "qmlscrubplayer.moc"

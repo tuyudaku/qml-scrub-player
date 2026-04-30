@@ -1,7 +1,10 @@
 #pragma once
 
+#include <QHash>
+#include <QImage>
 #include <QObject>
 #include <QQmlEngine>
+#include <QSize>
 #include <QUrl>
 #include <QVideoSink>
 #include <QtCore/QtGlobal>
@@ -25,12 +28,37 @@ class QMLSCRUBPLAYER_EXPORT QmlScrubPlayer : public QObject
     Q_PROPERTY(bool playing READ isPlaying NOTIFY playingChanged)
     Q_PROPERTY(qint64 duration READ duration NOTIFY durationChanged)
     Q_PROPERTY(qint64 position READ position WRITE setPosition NOTIFY positionChanged)
+    Q_PROPERTY(qint64 remainingTime READ remainingTime NOTIFY timelineChanged)
+    Q_PROPERTY(qreal progress READ progress NOTIFY timelineChanged)
+    Q_PROPERTY(QString timecode READ timecode NOTIFY timelineChanged)
+    Q_PROPERTY(QString durationTimecode READ durationTimecode NOTIFY timelineChanged)
+    Q_PROPERTY(qint64 currentFrame READ currentFrame NOTIFY currentFrameChanged)
+    Q_PROPERTY(qint64 frameCount READ frameCount NOTIFY mediaInfoChanged)
+    Q_PROPERTY(QSize videoSize READ videoSize NOTIFY mediaInfoChanged)
+    Q_PROPERTY(qreal aspectRatio READ aspectRatio NOTIFY mediaInfoChanged)
+    Q_PROPERTY(qreal frameRate READ frameRate NOTIFY mediaInfoChanged)
+    Q_PROPERTY(QString videoCodecName READ videoCodecName NOTIFY mediaInfoChanged)
+    Q_PROPERTY(QString audioCodecName READ audioCodecName NOTIFY mediaInfoChanged)
+    Q_PROPERTY(QString pixelFormat READ pixelFormat NOTIFY mediaInfoChanged)
+    Q_PROPERTY(QString audioFormat READ audioFormat NOTIFY mediaInfoChanged)
+    Q_PROPERTY(bool seekable READ isSeekable NOTIFY mediaInfoChanged)
+    Q_PROPERTY(bool hasAudio READ hasAudio NOTIFY mediaInfoChanged)
+    Q_PROPERTY(int audioChannelCount READ audioChannelCount NOTIFY mediaInfoChanged)
+    Q_PROPERTY(int audioSampleRate READ audioSampleRate NOTIFY mediaInfoChanged)
+    Q_PROPERTY(bool hasVideo READ hasVideo NOTIFY mediaInfoChanged)
+    Q_PROPERTY(bool canPlay READ canPlay NOTIFY playbackCapabilitiesChanged)
+    Q_PROPERTY(bool canPause READ canPause NOTIFY playbackCapabilitiesChanged)
+    Q_PROPERTY(bool canSeek READ canSeek NOTIFY playbackCapabilitiesChanged)
     Q_PROPERTY(float volume READ volume WRITE setVolume NOTIFY volumeChanged)
     Q_PROPERTY(bool muted READ isMuted WRITE setMuted NOTIFY mutedChanged)
     Q_PROPERTY(int loops READ loops WRITE setLoops NOTIFY loopsChanged)
+    Q_PROPERTY(qint64 loopStart READ loopStart WRITE setLoopStart NOTIFY loopRangeChanged)
+    Q_PROPERTY(qint64 loopEnd READ loopEnd WRITE setLoopEnd NOTIFY loopRangeChanged)
     Q_PROPERTY(qreal playbackRate READ playbackRate WRITE setPlaybackRate NOTIFY playbackRateChanged)
     Q_PROPERTY(int seekPreviewMaximumDimension READ seekPreviewMaximumDimension WRITE setSeekPreviewMaximumDimension NOTIFY seekPreviewMaximumDimensionChanged)
+    Q_PROPERTY(PlaybackState playbackState READ playbackState NOTIFY playbackStateChanged)
     Q_PROPERTY(Status status READ status NOTIFY statusChanged)
+    Q_PROPERTY(Error error READ error NOTIFY errorChanged)
     Q_PROPERTY(QString errorString READ errorString NOTIFY errorChanged)
     Q_PROPERTY(QVideoSink *videoSink READ videoSink WRITE setVideoSink NOTIFY videoSinkChanged)
 
@@ -47,6 +75,19 @@ public:
     };
     Q_ENUM(Status)
 
+    enum class PlaybackState {
+        Stopped,
+        Playing,
+        Paused
+    };
+    Q_ENUM(PlaybackState)
+
+    enum class Error {
+        NoError,
+        InvalidMedia
+    };
+    Q_ENUM(Error)
+
     explicit QmlScrubPlayer(QObject *parent = nullptr);
     ~QmlScrubPlayer() override;
 
@@ -61,6 +102,29 @@ public:
 
     qint64 position() const;
     void setPosition(qint64 position);
+    qint64 remainingTime() const;
+    qreal progress() const;
+    QString timecode() const;
+    QString durationTimecode() const;
+    qint64 currentFrame() const;
+    qint64 frameCount() const;
+
+    QSize videoSize() const;
+    qreal aspectRatio() const;
+    qreal frameRate() const;
+    QString videoCodecName() const;
+    QString audioCodecName() const;
+    QString pixelFormat() const;
+    QString audioFormat() const;
+    bool isSeekable() const;
+    bool hasAudio() const;
+    int audioChannelCount() const;
+    int audioSampleRate() const;
+    bool hasVideo() const;
+
+    bool canPlay() const;
+    bool canPause() const;
+    bool canSeek() const;
 
     float volume() const;
     void setVolume(float volume);
@@ -71,13 +135,21 @@ public:
     int loops() const;
     void setLoops(int loops);
 
+    qint64 loopStart() const;
+    void setLoopStart(qint64 loopStart);
+
+    qint64 loopEnd() const;
+    void setLoopEnd(qint64 loopEnd);
+
     qreal playbackRate() const;
     void setPlaybackRate(qreal playbackRate);
 
     int seekPreviewMaximumDimension() const;
     void setSeekPreviewMaximumDimension(int seekPreviewMaximumDimension);
 
+    PlaybackState playbackState() const;
     Status status() const;
+    Error error() const;
     QString errorString() const;
 
     QVideoSink *videoSink() const;
@@ -87,8 +159,18 @@ public:
     Q_INVOKABLE void pause();
     Q_INVOKABLE void stop();
     Q_INVOKABLE void seek(qint64 position);
+    Q_INVOKABLE void seekToFrame(qint64 frame);
     Q_INVOKABLE void previewSeek(qint64 position);
+    Q_INVOKABLE void previewSeekToFrame(qint64 frame);
     Q_INVOKABLE void endPreviewSeek(qint64 position);
+    Q_INVOKABLE void endPreviewSeekToFrame(qint64 frame);
+    Q_INVOKABLE void stepForward(int frames = 1);
+    Q_INVOKABLE void stepBackward(int frames = 1);
+    Q_INVOKABLE qint64 positionForFrame(qint64 frame) const;
+    Q_INVOKABLE qint64 frameForPosition(qint64 position) const;
+    Q_INVOKABLE QString timecodeForFrame(qint64 frame) const;
+    Q_INVOKABLE QString timecodeForPosition(qint64 position) const;
+    Q_INVOKABLE QImage captureFrame() const;
 
 signals:
     void sourceChanged();
@@ -96,11 +178,17 @@ signals:
     void playingChanged();
     void durationChanged();
     void positionChanged();
+    void timelineChanged();
+    void currentFrameChanged();
+    void mediaInfoChanged();
+    void playbackCapabilitiesChanged();
     void volumeChanged();
     void mutedChanged();
     void loopsChanged();
+    void loopRangeChanged();
     void playbackRateChanged();
     void seekPreviewMaximumDimensionChanged();
+    void playbackStateChanged();
     void statusChanged();
     void errorChanged();
     void videoSinkChanged();
@@ -110,8 +198,20 @@ private:
     void setPlaying(bool playing);
     void setDuration(qint64 duration);
     void setPositionFromDecoder(qint64 position);
+    void setMediaInfo(const QSize &videoSize, qreal frameRate, qint64 frameCount,
+        const QString &videoCodecName, const QString &audioCodecName,
+        const QString &pixelFormat, const QString &audioFormat,
+        bool seekable, bool hasAudio, int audioChannelCount, int audioSampleRate, bool hasVideo);
+    void resetMediaInfo();
+    qint64 frameStepDuration() const;
+    qint64 frameToPosition(qint64 frame) const;
+    qint64 positionToFrame(qint64 position) const;
+    qint64 clampPosition(qint64 position) const;
+    QString formatTimecode(qint64 position) const;
     void setStatus(Status status);
+    void setError(Error error, const QString &errorString);
     void setErrorString(const QString &errorString);
+    void emitPlaybackDerivedSignals();
 
     QmlScrubDecoder *m_decoder = nullptr;
     QmlScrubPreviewDecoder *m_previewDecoder = nullptr;
@@ -122,13 +222,31 @@ private:
     bool m_playing = false;
     qint64 m_duration = 0;
     qint64 m_position = 0;
+    QSize m_videoSize;
+    qreal m_frameRate = 0.0;
+    qint64 m_frameCount = 0;
+    QString m_videoCodecName;
+    QString m_audioCodecName;
+    QString m_pixelFormat;
+    QString m_audioFormat;
+    bool m_seekable = false;
+    bool m_hasAudio = false;
+    int m_audioChannelCount = 0;
+    int m_audioSampleRate = 0;
+    bool m_hasVideo = false;
     float m_volume = 1.0f;
     bool m_muted = false;
     int m_loops = 1;
+    qint64 m_loopStart = 0;
+    qint64 m_loopEnd = 0;
     qreal m_playbackRate = 1.0;
     int m_seekPreviewMaximumDimension = 4096;
     qint64 m_expectedFrameGeneration = 0;
     qint64 m_frameGenerationCounter = 0;
+    PlaybackState m_playbackState = PlaybackState::Stopped;
     Status m_status = Status::NoMedia;
+    Error m_error = Error::NoError;
     QString m_errorString;
+    QImage m_currentFrameImage;
+    QHash<qint64, QImage> m_previewFrameCache;
 };

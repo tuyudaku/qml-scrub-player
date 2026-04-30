@@ -66,7 +66,7 @@ ApplicationWindow {
 
                 Button {
                     text: player.playing ? "Pause" : "Play"
-                    enabled: player.source.toString().length > 0
+                    enabled: player.canPlay || player.canPause
                     onClicked: player.playing ? player.pause() : player.play()
                 }
 
@@ -82,7 +82,7 @@ ApplicationWindow {
                     from: 0
                     to: Math.max(player.duration, 1)
                     value: player.position
-                    enabled: player.duration > 0
+                    enabled: player.canSeek
                     live: true
                     onMoved: player.previewSeek(value)
                     onPressedChanged: {
@@ -93,7 +93,37 @@ ApplicationWindow {
                 }
 
                 Button {
+                    text: "-1f"
+                    enabled: player.canSeek
+                    onClicked: player.stepBackward()
+                }
+
+                Button {
+                    text: "+1f"
+                    enabled: player.canSeek
+                    onClicked: player.stepForward()
+                }
+
+                Button {
+                    text: "Loop"
+                    enabled: player.canSeek
+                    checkable: true
+                    onToggled: {
+                        if (checked) {
+                            player.loopStart = player.position
+                            player.loopEnd = Math.min(player.duration, player.position + 2000)
+                            player.loops = -1
+                        } else {
+                            player.loopStart = 0
+                            player.loopEnd = 0
+                            player.loops = 1
+                        }
+                    }
+                }
+
+                Button {
                     text: player.muted ? "Muted" : "Sound"
+                    enabled: player.hasAudio
                     onClicked: player.muted = !player.muted
                 }
 
@@ -107,9 +137,13 @@ ApplicationWindow {
 
                 Label {
                     color: "#d7dbe5"
-                    text: player.errorString
-                    visible: player.errorString.length > 0
-                    width: 180
+                    text: player.errorString.length > 0
+                        ? player.errorString
+                        : player.currentFrame + "/" + Math.max(player.frameCount - 1, 0)
+                          + "  " + player.timecode
+                          + "  " + player.videoCodecName
+                          + (player.hasAudio ? "  " + player.audioCodecName : "")
+                    width: 220
                     elide: Text.ElideRight
                 }
             }
