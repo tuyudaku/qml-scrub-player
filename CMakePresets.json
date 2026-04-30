@@ -4,7 +4,6 @@
     {
       "name": "default",
       "displayName": "Default",
-      "generator": "Ninja",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
@@ -18,6 +17,14 @@
       "cacheVariables": {
         "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
       }
+    },
+    {
+      "name": "vcpkg-linux-ci",
+      "displayName": "Linux CI with vcpkg dynamic libraries",
+      "inherits": "vcpkg",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-linux-dynamic"
+      }
     }
   ],
   "buildPresets": [
@@ -28,6 +35,10 @@
     {
       "name": "vcpkg",
       "configurePreset": "vcpkg"
+    },
+    {
+      "name": "vcpkg-linux-ci",
+      "configurePreset": "vcpkg-linux-ci"
     }
   ]
 }

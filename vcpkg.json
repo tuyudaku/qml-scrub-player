@@ -5,16 +5,6 @@
   "homepage": "https://github.com/yourname/QMLScrubPlayer",
   "license": "MIT",
   "dependencies": [
-    {
-      "name": "ffmpeg",
-      "default-features": false,
-      "features": [
-        "avcodec",
-        "avformat",
-        "avutil",
-        "swresample",
-        "swscale"
-      ]
-    }
+    "ffmpeg"
   ]
 }

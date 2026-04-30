@@ -2,7 +2,16 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
+      - develop
+      - "feature/**"
+      - "release/**"
+      - "hotfix/**"
   pull_request:
+    branches:
+      - main
+      - develop
 
 jobs:
   build:
@@ -17,11 +26,24 @@ jobs:
           version: "6.10.0"
           modules: qtmultimedia
 
-      - name: Install Ninja
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build nasm
+
+      - name: Configure vcpkg environment
+        run: |
+          if [ -n "${VCPKG_ROOT:-}" ]; then
+            echo "VCPKG_ROOT=${VCPKG_ROOT}" >> "$GITHUB_ENV"
+          elif [ -n "${VCPKG_INSTALLATION_ROOT:-}" ]; then
+            echo "VCPKG_ROOT=${VCPKG_INSTALLATION_ROOT}" >> "$GITHUB_ENV"
+          elif [ -d /usr/local/share/vcpkg ]; then
+            echo "VCPKG_ROOT=/usr/local/share/vcpkg" >> "$GITHUB_ENV"
+          else
+            git clone https://github.com/microsoft/vcpkg "$RUNNER_TEMP/vcpkg"
+            echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
+          fi
 
       - name: Configure
-        run: cmake --preset vcpkg -DCMAKE_PREFIX_PATH="${Qt6_DIR}/../../.."
+        run: cmake --preset vcpkg-linux-ci -G Ninja -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR}"
 
       - name: Build
-        run: cmake --build --preset vcpkg --parallel
+        run: cmake --build --preset vcpkg-linux-ci --parallel
