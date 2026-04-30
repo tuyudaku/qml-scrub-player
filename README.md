@@ -78,6 +78,13 @@ cmake --build build --target qmlscrubplayer_basic
 Run the generated `qmlscrubplayer_basic` executable from the corresponding build
 directory.
 
+## Run Tests
+
+```sh
+cmake --build build --target qmlscrubplayer_tests
+ctest --test-dir build --output-on-failure
+```
+
 ## Use From QML
 
 ```qml

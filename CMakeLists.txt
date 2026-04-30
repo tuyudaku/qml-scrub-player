@@ -8,6 +8,7 @@ project(QMLScrubPlayer
 )
 
 option(QMLSCRUBPLAYER_BUILD_EXAMPLES "Build QMLScrubPlayer examples" ON)
+option(QMLSCRUBPLAYER_BUILD_TESTS "Build QMLScrubPlayer tests" ON)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -81,6 +82,12 @@ add_subdirectory(src)
 
 if(QMLSCRUBPLAYER_BUILD_EXAMPLES)
     add_subdirectory(examples/basic)
+endif()
+
+if(QMLSCRUBPLAYER_BUILD_TESTS)
+    enable_testing()
+    find_package(Qt6 6.10 REQUIRED COMPONENTS Test)
+    add_subdirectory(tests)
 endif()
 
 write_basic_package_version_file(

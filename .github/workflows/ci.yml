@@ -47,3 +47,6 @@ jobs:
 
       - name: Build
         run: cmake --build --preset vcpkg-linux-ci --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
