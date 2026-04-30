@@ -10,10 +10,24 @@ using `VideoOutput` while the C++ side owns low-latency seek and decode control.
 - FFmpeg-backed video decoding
 - FFmpeg-backed audio decoding with `QAudioSink` output
 - `VideoOutput` integration through `player.videoSink`
-- Playback controls: `play()`, `pause()`, `stop()`, `seek(position)`
-- Scrubbing control: `previewSeek(position)` for lightweight keyframe previews
-- Properties for `source`, `playing`, `duration`, `position`, `volume`, `muted`,
-  `loops`, `playbackRate`, `status`, and `errorString`
+- Playback controls: `play()`, `pause()`, `stop()`, `seek(position)`,
+  `seekToFrame(frame)`, `stepForward(frames)`, `stepBackward(frames)`
+- Frame/time conversion helpers: `positionForFrame(frame)`,
+  `frameForPosition(position)`, `timecodeForFrame(frame)`,
+  `timecodeForPosition(position)`
+- Scrubbing control: `previewSeek(position)` and `previewSeekToFrame(frame)` for
+  lightweight keyframe previews
+- Range looping with `loopStart`, `loopEnd`, and `loops`
+- Current-frame capture with `captureFrame()`
+- Properties for `source`, `playing`, `duration`, `position`, `currentFrame`,
+  `remainingTime`, `progress`, `frameCount`, `volume`, `muted`, `loops`,
+  `playbackRate`, `timecode`, `durationTimecode`, `playbackState`, `status`,
+  `error`, and `errorString`
+- Media information available from QML/C++: `videoSize`, `aspectRatio`,
+  `frameRate`, `videoCodecName`, `audioCodecName`, `pixelFormat`,
+  `audioFormat`, `seekable`, `hasAudio`, `audioChannelCount`,
+  `audioSampleRate`, `hasVideo`
+- UI capability flags: `canPlay`, `canPause`, `canSeek`
 - Decoder-thread seeking with `av_seek_frame()` and codec buffer flush
 - Dedicated preview decoder for scrub-bar dragging
 - Keyframe-index assisted preview seeking
@@ -107,7 +121,8 @@ VideoOutput {
 ```
 
 For responsive scrub bars, call `previewSeek(position)` while dragging and
-`endPreviewSeek(position)` when the user releases the handle.
+`endPreviewSeek(position)` when the user releases the handle. Frame-based UIs
+can use `previewSeekToFrame(frame)` and `endPreviewSeekToFrame(frame)`.
 
 ## Install
 
@@ -153,9 +168,31 @@ player->play();
 ```
 
 Available C++ state includes `source()`, `isPlaying()`, `duration()`,
-`position()`, `volume()`, `isMuted()`, `status()`, and `errorString()`. The same
-control methods used from QML are available from C++: `play()`, `pause()`,
-`stop()`, `seek()`, `previewSeek()`, and `endPreviewSeek()`.
+`position()`, `remainingTime()`, `progress()`, `timecode()`,
+`durationTimecode()`, `currentFrame()`, `frameCount()`,
+`videoSize()`, `aspectRatio()`, `frameRate()`, `videoCodecName()`,
+`audioCodecName()`, `pixelFormat()`, `audioFormat()`, `isSeekable()`,
+`hasAudio()`, `audioChannelCount()`, `audioSampleRate()`, `hasVideo()`,
+`canPlay()`, `canPause()`, `canSeek()`, `volume()`, `isMuted()`,
+`playbackState()`, `status()`, `error()`, and `errorString()`. The same control
+methods used from QML are available from C++: `play()`, `pause()`, `stop()`,
+`seek()`, `seekToFrame()`, `stepForward()`, `stepBackward()`,
+`positionForFrame()`, `frameForPosition()`, `timecodeForFrame()`,
+`timecodeForPosition()`, `captureFrame()`, `previewSeek()`, `previewSeekToFrame()`,
+`endPreviewSeek()`, and `endPreviewSeekToFrame()`.
+
+## API Overview
+
+| Area | API |
+| --- | --- |
+| Playback | `play()`, `pause()`, `stop()`, `playing`, `playbackState`, `canPlay`, `canPause` |
+| Timeline | `duration`, `position`, `remainingTime`, `progress`, `timecode`, `durationTimecode`, `seek()`, `canSeek`, `seekable` |
+| Frames | `currentFrame`, `frameCount`, `seekToFrame()`, `stepForward()`, `stepBackward()`, `positionForFrame()`, `frameForPosition()`, `timecodeForFrame()`, `timecodeForPosition()` |
+| Scrubbing | `previewSeek()`, `previewSeekToFrame()`, `endPreviewSeek()`, `endPreviewSeekToFrame()` |
+| Media | `videoSize`, `aspectRatio`, `frameRate`, `videoCodecName`, `audioCodecName`, `pixelFormat`, `audioFormat`, `hasAudio`, `hasVideo` |
+| Looping | `loops`, `loopStart`, `loopEnd` |
+| Capture | `captureFrame()` |
+| Errors | `status`, `error`, `errorString` |
 
 ## Notes
 

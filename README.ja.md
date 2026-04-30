@@ -10,10 +10,15 @@ FFmpeg で動画をデコードし、Qt Quick には `QVideoSink` 経由でフ�
 - FFmpeg ベースの動画デコード
 - FFmpeg ベースの音声デコードと `QAudioSink` による出力
 - `VideoOutput` との連携: `videoSink: output.videoSink`
-- 再生操作: `play()`, `pause()`, `stop()`, `seek(position)`
-- ドラッグ中の軽量プレビュー用: `previewSeek(position)`
+- 再生操作: `play()`, `pause()`, `stop()`, `seek(position)`, `seekToFrame(frame)`, `stepForward(frames)`, `stepBackward(frames)`
+- フレーム/時刻変換: `positionForFrame(frame)`, `frameForPosition(position)`, `timecodeForFrame(frame)`, `timecodeForPosition(position)`
+- ドラッグ中の軽量プレビュー用: `previewSeek(position)`, `previewSeekToFrame(frame)`
+- 範囲ループ: `loopStart`, `loopEnd`, `loops`
+- 現在フレーム画像の取得: `captureFrame()`
 - 専用のプレビューデコーダによるスクラブ操作
 - キーフレームインデックスを使った高速プレビューシーク
+- QML/C++ から参照できるメディア情報: `currentFrame`, `frameCount`, `videoSize`, `aspectRatio`, `frameRate`, `videoCodecName`, `audioCodecName`, `pixelFormat`, `audioFormat`, `seekable`, `hasAudio`, `audioChannelCount`, `audioSampleRate`, `hasVideo`
+- UI 制御用の状態: `canPlay`, `canPause`, `canSeek`, `playbackState`, `error`
 - 対応環境ではハードウェアデコードを利用
   - macOS: VideoToolbox
   - Windows: D3D11VA、失敗時 DXVA2
@@ -99,6 +104,8 @@ VideoOutput {
 
 シークバーを気持ちよく動かすには、ドラッグ中は `previewSeek(position)`、
 ドラッグを離した時に `endPreviewSeek(position)` を呼びます。
+フレーム番号ベースの UI では `previewSeekToFrame(frame)` と
+`endPreviewSeekToFrame(frame)` も使えます。
 
 ```qml
 Slider {
@@ -158,8 +165,27 @@ player->play();
 ```
 
 C++ から参照できる主な状態は `source()`, `isPlaying()`, `duration()`,
-`position()`, `volume()`, `isMuted()`, `status()`, `errorString()` です。操作メソッドも QML と同じく
-`play()`, `pause()`, `stop()`, `seek()`, `previewSeek()`, `endPreviewSeek()` を利用できます。
+`position()`, `remainingTime()`, `progress()`, `timecode()`, `durationTimecode()`, `currentFrame()`, `frameCount()`,
+`videoSize()`, `aspectRatio()`, `frameRate()`, `videoCodecName()`, `audioCodecName()`,
+`pixelFormat()`, `audioFormat()`, `isSeekable()`, `hasAudio()`, `audioChannelCount()`,
+`audioSampleRate()`, `hasVideo()`, `canPlay()`, `canPause()`, `canSeek()`,
+`volume()`, `isMuted()`, `playbackState()`, `status()`, `error()`, `errorString()` です。操作メソッドも QML と同じく
+`play()`, `pause()`, `stop()`, `seek()`, `seekToFrame()`, `stepForward()`, `stepBackward()`,
+`positionForFrame()`, `frameForPosition()`, `timecodeForFrame()`, `timecodeForPosition()`, `captureFrame()`, `previewSeek()`, `previewSeekToFrame()`,
+`endPreviewSeek()`, `endPreviewSeekToFrame()` を利用できます。
+
+## API 一覧
+
+| 分類 | API |
+| --- | --- |
+| 再生 | `play()`, `pause()`, `stop()`, `playing`, `playbackState`, `canPlay`, `canPause` |
+| タイムライン | `duration`, `position`, `remainingTime`, `progress`, `timecode`, `durationTimecode`, `seek()`, `canSeek`, `seekable` |
+| フレーム | `currentFrame`, `frameCount`, `seekToFrame()`, `stepForward()`, `stepBackward()`, `positionForFrame()`, `frameForPosition()`, `timecodeForFrame()`, `timecodeForPosition()` |
+| スクラブ | `previewSeek()`, `previewSeekToFrame()`, `endPreviewSeek()`, `endPreviewSeekToFrame()` |
+| メディア | `videoSize`, `aspectRatio`, `frameRate`, `videoCodecName`, `audioCodecName`, `pixelFormat`, `audioFormat`, `hasAudio`, `hasVideo` |
+| ループ | `loops`, `loopStart`, `loopEnd` |
+| キャプチャ | `captureFrame()` |
+| エラー | `status`, `error`, `errorString` |
 
 ## 補足
 
