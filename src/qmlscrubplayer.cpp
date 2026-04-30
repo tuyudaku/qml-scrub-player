@@ -102,6 +102,40 @@ qint64 timestampToMs(qint64 timestamp, AVRational timeBase)
     return av_rescale_q(timestamp, timeBase, AVRational{1, 1000});
 }
 
+qint64 streamDurationToMs(const AVStream *stream)
+{
+    if (!stream) {
+        return 0;
+    }
+
+    if (stream->duration != AV_NOPTS_VALUE && stream->duration > 0) {
+        return timestampToMs(stream->duration, stream->time_base);
+    }
+
+    if (stream->nb_frames > 0 && stream->avg_frame_rate.num > 0 && stream->avg_frame_rate.den > 0) {
+        return av_rescale_q(stream->nb_frames, av_inv_q(stream->avg_frame_rate), AVRational{1, 1000});
+    }
+
+    return 0;
+}
+
+qint64 formatDurationToMs(const AVFormatContext *format)
+{
+    if (!format) {
+        return 0;
+    }
+
+    qint64 durationMs = format->duration != AV_NOPTS_VALUE
+        ? av_rescale_q(format->duration, AVRational{1, AV_TIME_BASE}, AVRational{1, 1000})
+        : 0;
+
+    for (unsigned int index = 0; index < format->nb_streams; ++index) {
+        durationMs = std::max(durationMs, streamDurationToMs(format->streams[index]));
+    }
+
+    return durationMs;
+}
+
 QVector<AVHWDeviceType> preferredHardwareDeviceTypes()
 {
     QVector<AVHWDeviceType> types;
@@ -383,10 +417,7 @@ protected:
             audioFrame.reset();
         }
 
-        const qint64 durationMs = format->duration != AV_NOPTS_VALUE
-            ? av_rescale_q(format->duration, AVRational{1, AV_TIME_BASE}, AVRational{1, 1000})
-            : 0;
-        emit durationReady(durationMs);
+        emit durationReady(formatDurationToMs(format.get()));
         emit statusReady(QmlScrubPlayer::Status::Loaded);
 
         PacketPtr packet(av_packet_alloc());
