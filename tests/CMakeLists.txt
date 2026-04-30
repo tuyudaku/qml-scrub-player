@@ -19,6 +19,11 @@ target_compile_definitions(qmlscrubplayer_tests
 
 add_test(NAME qmlscrubplayer_tests COMMAND qmlscrubplayer_tests)
 
+set_tests_properties(qmlscrubplayer_tests
+    PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software"
+)
+
 add_test(
     NAME qmlscrubplayer_install_tree
     COMMAND
