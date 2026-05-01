@@ -341,6 +341,9 @@ void QmlScrubPlayerTest::defaultState()
     QCOMPARE(player.loopEnd(), 0);
     QCOMPARE(player.playbackRate(), 1.0);
     QCOMPARE(player.seekPreviewMaximumDimension(), 4096);
+    QCOMPARE(player.previewCacheSize(), 0);
+    QCOMPARE(player.previewCacheLimit(), 64);
+    QVERIFY(player.markers().isEmpty());
     QCOMPARE(player.playbackState(), QmlScrubPlayer::PlaybackState::Stopped);
     QCOMPARE(player.status(), QmlScrubPlayer::Status::NoMedia);
     QCOMPARE(player.error(), QmlScrubPlayer::Error::NoError);
@@ -355,12 +358,16 @@ void QmlScrubPlayerTest::sourceChangeEmitsSignals()
     QSignalSpy sourceSpy(&player, &QmlScrubPlayer::sourceChanged);
     QSignalSpy statusSpy(&player, &QmlScrubPlayer::statusChanged);
     QSignalSpy mediaInfoSpy(&player, &QmlScrubPlayer::mediaInfoChanged);
+    player.addMarker(120);
+    QSignalSpy markersSpy(&player, &QmlScrubPlayer::markersChanged);
 
     const QUrl source = QUrl::fromLocalFile(QStringLiteral("/tmp/nonexistent.mp4"));
     player.setSource(source);
 
     QCOMPARE(player.source(), source);
     QCOMPARE(sourceSpy.count(), 1);
+    QVERIFY(player.markers().isEmpty());
+    QCOMPARE(markersSpy.count(), 1);
     QVERIFY(statusSpy.count() >= 1);
     QVERIFY(player.duration() == 0);
     QVERIFY(player.canPlay());
@@ -418,6 +425,22 @@ void QmlScrubPlayerTest::playbackOptionsEmitSignals()
     player.setLoopEnd(50);
     QCOMPARE(player.loopEnd(), 0);
     QCOMPARE(loopRangeSpy.count(), 3);
+    player.setLoopRange(250, 750);
+    QCOMPARE(player.loopStart(), 250);
+    QCOMPARE(player.loopEnd(), 750);
+    QCOMPARE(loopRangeSpy.count(), 4);
+    player.setLoopRange(750, 250);
+    QCOMPARE(player.loopStart(), 750);
+    QCOMPARE(player.loopEnd(), 0);
+    QCOMPARE(loopRangeSpy.count(), 5);
+    player.setLoopRangeForFrames(3, 8);
+    QCOMPARE(player.loopStart(), 120);
+    QCOMPARE(player.loopEnd(), 320);
+    QCOMPARE(loopRangeSpy.count(), 6);
+    player.clearLoopRange();
+    QCOMPARE(player.loopStart(), 0);
+    QCOMPARE(player.loopEnd(), 0);
+    QCOMPARE(loopRangeSpy.count(), 7);
 
     QSignalSpy rateSpy(&player, &QmlScrubPlayer::playbackRateChanged);
     player.setPlaybackRate(0.001);
@@ -434,6 +457,34 @@ void QmlScrubPlayerTest::playbackOptionsEmitSignals()
     player.setSeekPreviewMaximumDimension(9999);
     QCOMPARE(player.seekPreviewMaximumDimension(), 4096);
     QCOMPARE(previewSizeSpy.count(), 2);
+
+    QSignalSpy previewCacheLimitSpy(&player, &QmlScrubPlayer::previewCacheLimitChanged);
+    player.setPreviewCacheLimit(-1);
+    QCOMPARE(player.previewCacheLimit(), 0);
+    QCOMPARE(previewCacheLimitSpy.count(), 1);
+    player.setPreviewCacheLimit(2048);
+    QCOMPARE(player.previewCacheLimit(), 1024);
+    QCOMPARE(previewCacheLimitSpy.count(), 2);
+
+    QSignalSpy markersSpy(&player, &QmlScrubPlayer::markersChanged);
+    player.addMarker(500);
+    player.addMarker(100);
+    QCOMPARE(player.markers(), (QVariantList{QVariant::fromValue<qint64>(100), QVariant::fromValue<qint64>(500)}));
+    QCOMPARE(markersSpy.count(), 2);
+    player.addMarker(500);
+    QCOMPARE(markersSpy.count(), 2);
+    player.addMarkerForFrame(2);
+    QCOMPARE(player.markers(), (QVariantList{QVariant::fromValue<qint64>(80), QVariant::fromValue<qint64>(100), QVariant::fromValue<qint64>(500)}));
+    QCOMPARE(markersSpy.count(), 3);
+    player.removeMarker(100);
+    QCOMPARE(player.markers(), (QVariantList{QVariant::fromValue<qint64>(80), QVariant::fromValue<qint64>(500)}));
+    QCOMPARE(markersSpy.count(), 4);
+    player.removeMarkerForFrame(2);
+    QCOMPARE(player.markers(), (QVariantList{QVariant::fromValue<qint64>(500)}));
+    QCOMPARE(markersSpy.count(), 5);
+    player.clearMarkers();
+    QVERIFY(player.markers().isEmpty());
+    QCOMPARE(markersSpy.count(), 6);
 }
 
 void QmlScrubPlayerTest::videoSinkCanBeReplacedAndReset()
@@ -532,8 +583,24 @@ void QmlScrubPlayerTest::qmlImportCreatesPlayer()
     component.setData(R"(
         import QMLScrubPlayer
         QmlScrubPlayer {
+            id: player
             autoPlay: true
             volume: 0.5
+            property bool helperCallsWorked: false
+
+            function runHelperCalls() {
+                setLoopRange(100, 300)
+                setLoopRangeForFrames(2, 4)
+                clearLoopRange()
+                addMarker(100)
+                addMarkerForFrame(2)
+                removeMarkerForFrame(2)
+                clearPreviewCache()
+                requestThumbnail(0, 7)
+                requestThumbnailForFrame(1, 8)
+                helperCallsWorked = loopStart === 0 && loopEnd === 0
+                    && markers.length === 1 && markers[0] === 100
+            }
         }
     )", QUrl());
 
@@ -542,6 +609,8 @@ void QmlScrubPlayerTest::qmlImportCreatesPlayer()
     QVERIFY2(object != nullptr, qPrintable(component.errorString()));
     QCOMPARE(object->property("autoPlay").toBool(), true);
     QCOMPARE(object->property("volume").toFloat(), 0.5f);
+    QVERIFY(QMetaObject::invokeMethod(object.get(), "runHelperCalls"));
+    QCOMPARE(object->property("helperCallsWorked").toBool(), true);
 }
 
 void QmlScrubPlayerTest::invalidSourceReportsError()
@@ -555,7 +624,7 @@ void QmlScrubPlayerTest::invalidSourceReportsError()
     QVERIFY(waitUntil([&player] {
         return player.status() == QmlScrubPlayer::Status::InvalidMedia;
     }));
-    QCOMPARE(player.error(), QmlScrubPlayer::Error::InvalidMedia);
+    QCOMPARE(player.error(), QmlScrubPlayer::Error::OpenFailed);
     QVERIFY(!player.errorString().isEmpty());
     QVERIFY(errorSpy.count() >= 1);
     QVERIFY(statusSpy.count() >= 1);
@@ -576,6 +645,7 @@ void QmlScrubPlayerTest::generatedVideoEmitsDurationAndFrames()
     QSignalSpy mediaInfoSpy(&player, &QmlScrubPlayer::mediaInfoChanged);
     QSignalSpy frameSpy(&sink, &QVideoSink::videoFrameChanged);
     QSignalSpy positionSpy(&player, &QmlScrubPlayer::positionChanged);
+    QSignalSpy thumbnailSpy(&player, &QmlScrubPlayer::thumbnailReady);
 
     player.setSource(QUrl::fromLocalFile(mediaPath));
     QVERIFY(waitUntil([&player] {
@@ -627,6 +697,20 @@ void QmlScrubPlayerTest::generatedVideoEmitsDurationAndFrames()
     player.endPreviewSeekToFrame(2);
     QCOMPARE(player.position(), 200);
     QCOMPARE(player.currentFrame(), 2);
+    player.requestThumbnailForFrame(4, 42);
+    QVERIFY(waitUntil([&thumbnailSpy] {
+        return thumbnailSpy.count() > 0;
+    }));
+    const auto thumbnailArgs = thumbnailSpy.takeFirst();
+    QVERIFY(!qvariant_cast<QImage>(thumbnailArgs.at(0)).isNull());
+    QCOMPARE(thumbnailArgs.at(2).toInt(), 42);
+    player.requestThumbnailForFrame(5);
+    QVERIFY(waitUntil([&thumbnailSpy] {
+        return thumbnailSpy.count() > 0;
+    }));
+    const auto autoThumbnailArgs = thumbnailSpy.takeFirst();
+    QVERIFY(!qvariant_cast<QImage>(autoThumbnailArgs.at(0)).isNull());
+    QVERIFY(autoThumbnailArgs.at(2).toInt() > 0);
     const qint64 lastFrame = player.frameCount() - 1;
     player.seekToFrame(999);
     QCOMPARE(player.positionForFrame(999), player.positionForFrame(lastFrame));
@@ -700,6 +784,7 @@ void QmlScrubPlayerTest::previewSeekSuppressesPlaybackAudio()
     player.setVideoSink(&sink);
     player.setVolume(0.0f);
     QSignalSpy frameSpy(&sink, &QVideoSink::videoFrameChanged);
+    QSignalSpy previewCacheSpy(&player, &QmlScrubPlayer::previewCacheChanged);
 
     player.setSource(QUrl::fromLocalFile(mediaPath));
     QVERIFY(waitUntil([&player] {
@@ -716,6 +801,11 @@ void QmlScrubPlayerTest::previewSeekSuppressesPlaybackAudio()
     QVERIFY(waitUntil([&frameSpy, framesBeforePreview] {
         return frameSpy.count() > framesBeforePreview;
     }));
+    QVERIFY(player.previewCacheSize() > 0);
+    QVERIFY(previewCacheSpy.count() >= 1);
+
+    player.clearPreviewCache();
+    QCOMPARE(player.previewCacheSize(), 0);
 
     player.endPreviewSeek(700);
     QVERIFY(player.position() >= 0);

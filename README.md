@@ -17,7 +17,15 @@ using `VideoOutput` while the C++ side owns low-latency seek and decode control.
   `timecodeForPosition(position)`
 - Scrubbing control: `previewSeek(position)` and `previewSeekToFrame(frame)` for
   lightweight keyframe previews
+- Preview cache controls: `previewCacheSize`, `previewCacheLimit`,
+  `clearPreviewCache()`
+- Thumbnail requests with `requestThumbnail()`, `requestThumbnailForFrame()`,
+  and `thumbnailReady`
+- Timeline markers with `markers`, `addMarker()`, `removeMarker()`, and
+  `clearMarkers()`
 - Range looping with `loopStart`, `loopEnd`, and `loops`
+- Loop range helpers: `setLoopRange()`, `setLoopRangeForFrames()`, and
+  `clearLoopRange()`
 - Current-frame capture with `captureFrame()`
 - Properties for `source`, `playing`, `duration`, `position`, `currentFrame`,
   `remainingTime`, `progress`, `frameCount`, `volume`, `muted`, `loops`,
@@ -176,7 +184,8 @@ Available C++ state includes `source()`, `isPlaying()`, `duration()`,
 `canPlay()`, `canPause()`, `canSeek()`, `volume()`, `isMuted()`,
 `playbackState()`, `status()`, `error()`, and `errorString()`. The same control
 methods used from QML are available from C++: `play()`, `pause()`, `stop()`,
-`seek()`, `seekToFrame()`, `stepForward()`, `stepBackward()`,
+`seek()`, `seekToFrame()`, `setLoopRange()`, `setLoopRangeForFrames()`,
+`clearLoopRange()`, `stepForward()`, `stepBackward()`,
 `positionForFrame()`, `frameForPosition()`, `timecodeForFrame()`,
 `timecodeForPosition()`, `captureFrame()`, `previewSeek()`, `previewSeekToFrame()`,
 `endPreviewSeek()`, and `endPreviewSeekToFrame()`.
@@ -188,11 +197,26 @@ methods used from QML are available from C++: `play()`, `pause()`, `stop()`,
 | Playback | `play()`, `pause()`, `stop()`, `playing`, `playbackState`, `canPlay`, `canPause` |
 | Timeline | `duration`, `position`, `remainingTime`, `progress`, `timecode`, `durationTimecode`, `seek()`, `canSeek`, `seekable` |
 | Frames | `currentFrame`, `frameCount`, `seekToFrame()`, `stepForward()`, `stepBackward()`, `positionForFrame()`, `frameForPosition()`, `timecodeForFrame()`, `timecodeForPosition()` |
-| Scrubbing | `previewSeek()`, `previewSeekToFrame()`, `endPreviewSeek()`, `endPreviewSeekToFrame()` |
+| Scrubbing | `previewSeek()`, `previewSeekToFrame()`, `endPreviewSeek()`, `endPreviewSeekToFrame()`, `previewCacheSize`, `previewCacheLimit`, `clearPreviewCache()` |
+| Thumbnails | `requestThumbnail()`, `requestThumbnailForFrame()`, `thumbnailReady` |
+| Markers | `markers`, `addMarker()`, `addMarkerForFrame()`, `removeMarker()`, `removeMarkerForFrame()`, `clearMarkers()` |
 | Media | `videoSize`, `aspectRatio`, `frameRate`, `videoCodecName`, `audioCodecName`, `pixelFormat`, `audioFormat`, `hasAudio`, `hasVideo` |
-| Looping | `loops`, `loopStart`, `loopEnd` |
+| Looping | `loops`, `loopStart`, `loopEnd`, `setLoopRange()`, `setLoopRangeForFrames()`, `clearLoopRange()` |
 | Capture | `captureFrame()` |
-| Errors | `status`, `error`, `errorString` |
+| Errors | `status`, `error`, `errorString`; `error` distinguishes open, stream-info, decoder, seek, read, decode, scaler, audio, and media failures |
+
+## Usage Notes
+
+Use `previewCacheLimit` to cap how many scrub-preview frames are retained in
+memory, and `clearPreviewCache()` when the surrounding UI no longer needs them.
+`requestThumbnail()` and `requestThumbnailForFrame()` generate a preview image
+without changing the visible playback position; pass a request id if the UI needs
+to match responses to requests, or omit it to let the player assign one.
+
+Markers are source-local millisecond positions intended for timeline UI, review
+points, or quick return points. They are sorted, deduplicated, and cleared when a
+new source is set. `setLoopRange()` and `setLoopRangeForFrames()` update the loop
+start/end as one operation; `clearLoopRange()` disables the active range.
 
 ## Notes
 

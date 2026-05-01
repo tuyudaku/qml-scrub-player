@@ -2,10 +2,12 @@
 
 #include <QHash>
 #include <QImage>
+#include <QList>
 #include <QObject>
 #include <QQmlEngine>
 #include <QSize>
 #include <QUrl>
+#include <QVariantList>
 #include <QVideoSink>
 #include <QtCore/QtGlobal>
 
@@ -56,6 +58,9 @@ class QMLSCRUBPLAYER_EXPORT QmlScrubPlayer : public QObject
     Q_PROPERTY(qint64 loopEnd READ loopEnd WRITE setLoopEnd NOTIFY loopRangeChanged)
     Q_PROPERTY(qreal playbackRate READ playbackRate WRITE setPlaybackRate NOTIFY playbackRateChanged)
     Q_PROPERTY(int seekPreviewMaximumDimension READ seekPreviewMaximumDimension WRITE setSeekPreviewMaximumDimension NOTIFY seekPreviewMaximumDimensionChanged)
+    Q_PROPERTY(int previewCacheSize READ previewCacheSize NOTIFY previewCacheChanged)
+    Q_PROPERTY(int previewCacheLimit READ previewCacheLimit WRITE setPreviewCacheLimit NOTIFY previewCacheLimitChanged)
+    Q_PROPERTY(QVariantList markers READ markers NOTIFY markersChanged)
     Q_PROPERTY(PlaybackState playbackState READ playbackState NOTIFY playbackStateChanged)
     Q_PROPERTY(Status status READ status NOTIFY statusChanged)
     Q_PROPERTY(Error error READ error NOTIFY errorChanged)
@@ -84,6 +89,22 @@ public:
 
     enum class Error {
         NoError,
+        OpenFailed,
+        StreamInfoFailed,
+        NoVideoStream,
+        DecoderNotFound,
+        DecoderAllocationFailed,
+        CodecParametersFailed,
+        DecoderOpenFailed,
+        FrameAllocationFailed,
+        ReadFailed,
+        PacketSendFailed,
+        DecodeFailed,
+        HardwareTransferFailed,
+        SeekFailed,
+        AudioInitializationFailed,
+        InvalidAudioFormat,
+        ScalerCreationFailed,
         InvalidMedia
     };
     Q_ENUM(Error)
@@ -147,6 +168,11 @@ public:
     int seekPreviewMaximumDimension() const;
     void setSeekPreviewMaximumDimension(int seekPreviewMaximumDimension);
 
+    int previewCacheSize() const;
+    int previewCacheLimit() const;
+    void setPreviewCacheLimit(int previewCacheLimit);
+    QVariantList markers() const;
+
     PlaybackState playbackState() const;
     Status status() const;
     Error error() const;
@@ -160,6 +186,9 @@ public:
     Q_INVOKABLE void stop();
     Q_INVOKABLE void seek(qint64 position);
     Q_INVOKABLE void seekToFrame(qint64 frame);
+    Q_INVOKABLE void setLoopRange(qint64 loopStart, qint64 loopEnd);
+    Q_INVOKABLE void setLoopRangeForFrames(qint64 loopStartFrame, qint64 loopEndFrame);
+    Q_INVOKABLE void clearLoopRange();
     Q_INVOKABLE void previewSeek(qint64 position);
     Q_INVOKABLE void previewSeekToFrame(qint64 frame);
     Q_INVOKABLE void endPreviewSeek(qint64 position);
@@ -171,6 +200,14 @@ public:
     Q_INVOKABLE QString timecodeForFrame(qint64 frame) const;
     Q_INVOKABLE QString timecodeForPosition(qint64 position) const;
     Q_INVOKABLE QImage captureFrame() const;
+    Q_INVOKABLE void clearPreviewCache();
+    Q_INVOKABLE void requestThumbnail(qint64 position, int requestId = 0);
+    Q_INVOKABLE void requestThumbnailForFrame(qint64 frame, int requestId = 0);
+    Q_INVOKABLE void addMarker(qint64 position);
+    Q_INVOKABLE void addMarkerForFrame(qint64 frame);
+    Q_INVOKABLE void removeMarker(qint64 position);
+    Q_INVOKABLE void removeMarkerForFrame(qint64 frame);
+    Q_INVOKABLE void clearMarkers();
 
 signals:
     void sourceChanged();
@@ -188,10 +225,14 @@ signals:
     void loopRangeChanged();
     void playbackRateChanged();
     void seekPreviewMaximumDimensionChanged();
+    void previewCacheChanged();
+    void previewCacheLimitChanged();
+    void markersChanged();
     void playbackStateChanged();
     void statusChanged();
     void errorChanged();
     void videoSinkChanged();
+    void thumbnailReady(const QImage &image, qint64 position, int requestId);
 
 private:
     void recreateDecoder();
@@ -208,6 +249,7 @@ private:
     qint64 positionToFrame(qint64 position) const;
     qint64 clampPosition(qint64 position) const;
     QString formatTimecode(qint64 position) const;
+    bool trimPreviewCache();
     void setStatus(Status status);
     void setError(Error error, const QString &errorString);
     void setErrorString(const QString &errorString);
@@ -243,10 +285,13 @@ private:
     int m_seekPreviewMaximumDimension = 4096;
     qint64 m_expectedFrameGeneration = 0;
     qint64 m_frameGenerationCounter = 0;
+    int m_thumbnailRequestCounter = 0;
     PlaybackState m_playbackState = PlaybackState::Stopped;
     Status m_status = Status::NoMedia;
     Error m_error = Error::NoError;
     QString m_errorString;
     QImage m_currentFrameImage;
     QHash<qint64, QImage> m_previewFrameCache;
+    QList<qint64> m_markers;
+    int m_previewCacheLimit = 64;
 };
