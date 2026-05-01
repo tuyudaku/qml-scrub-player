@@ -66,8 +66,6 @@ using SwrContextPtr = std::unique_ptr<SwrContext, SwrDeleter>;
 
 constexpr int defaultSeekPreviewMaximumDimension = 4096;
 constexpr qint64 fallbackFrameStepMs = 40;
-constexpr int previewFrameCacheLimit = 64;
-
 struct HardwareDecoder
 {
     AVBufferRef *deviceContext = nullptr;
@@ -434,7 +432,7 @@ signals:
         bool seekable, bool hasAudio, int audioChannelCount, int audioSampleRate, bool hasVideo);
     void frameReady(const QImage &image, qint64 position, qint64 generation);
     void statusReady(QmlScrubPlayer::Status status);
-    void errorReady(const QString &message);
+    void errorReady(QmlScrubPlayer::Error error, const QString &message);
     void playbackEnded();
 
 protected:
@@ -451,37 +449,37 @@ protected:
         AVFormatContext *rawFormat = nullptr;
         const QByteArray input = urlToInput(source).toUtf8();
         if (const int result = avformat_open_input(&rawFormat, input.constData(), nullptr, nullptr); result < 0) {
-            emitError(QStringLiteral("Could not open input: %1").arg(ffmpegError(result)));
+            emitError(QmlScrubPlayer::Error::OpenFailed, QStringLiteral("Could not open input: %1").arg(ffmpegError(result)));
             return;
         }
         FormatContextPtr format(rawFormat);
 
         if (const int result = avformat_find_stream_info(format.get(), nullptr); result < 0) {
-            emitError(QStringLiteral("Could not read stream info: %1").arg(ffmpegError(result)));
+            emitError(QmlScrubPlayer::Error::StreamInfoFailed, QStringLiteral("Could not read stream info: %1").arg(ffmpegError(result)));
             return;
         }
 
         const int videoStream = av_find_best_stream(format.get(), AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
         if (videoStream < 0) {
-            emitError(QStringLiteral("No video stream found"));
+            emitError(QmlScrubPlayer::Error::NoVideoStream, QStringLiteral("No video stream found"));
             return;
         }
 
         AVStream *stream = format->streams[videoStream];
         const AVCodec *codec = avcodec_find_decoder(stream->codecpar->codec_id);
         if (!codec) {
-            emitError(QStringLiteral("No decoder found for video stream"));
+            emitError(QmlScrubPlayer::Error::DecoderNotFound, QStringLiteral("No decoder found for video stream"));
             return;
         }
 
         CodecContextPtr codecContext(avcodec_alloc_context3(codec));
         if (!codecContext) {
-            emitError(QStringLiteral("Could not allocate decoder context"));
+            emitError(QmlScrubPlayer::Error::DecoderAllocationFailed, QStringLiteral("Could not allocate decoder context"));
             return;
         }
 
         if (const int result = avcodec_parameters_to_context(codecContext.get(), stream->codecpar); result < 0) {
-            emitError(QStringLiteral("Could not copy codec parameters: %1").arg(ffmpegError(result)));
+            emitError(QmlScrubPlayer::Error::CodecParametersFailed, QStringLiteral("Could not copy codec parameters: %1").arg(ffmpegError(result)));
             return;
         }
 
@@ -491,7 +489,7 @@ protected:
         configureHardwareDecoder(codec, codecContext.get(), hardwareDecoder);
 
         if (const int result = avcodec_open2(codecContext.get(), codec, nullptr); result < 0) {
-            emitError(QStringLiteral("Could not open decoder: %1").arg(ffmpegError(result)));
+            emitError(QmlScrubPlayer::Error::DecoderOpenFailed, QStringLiteral("Could not open decoder: %1").arg(ffmpegError(result)));
             return;
         }
 
@@ -539,7 +537,7 @@ protected:
         FramePtr frame(av_frame_alloc());
         FramePtr transferFrame(av_frame_alloc());
         if (!packet || !frame) {
-            emitError(QStringLiteral("Could not allocate FFmpeg frame buffers"));
+            emitError(QmlScrubPlayer::Error::FrameAllocationFailed, QStringLiteral("Could not allocate FFmpeg frame buffers"));
             return;
         }
 
@@ -588,7 +586,7 @@ protected:
                 break;
             }
             if (readResult < 0) {
-                emitError(QStringLiteral("Could not read frame: %1").arg(ffmpegError(readResult)));
+                emitError(QmlScrubPlayer::Error::ReadFailed, QStringLiteral("Could not read frame: %1").arg(ffmpegError(readResult)));
                 break;
             }
 
@@ -611,7 +609,7 @@ protected:
             const int sendResult = avcodec_send_packet(codecContext.get(), packet.get());
             av_packet_unref(packet.get());
             if (sendResult < 0 && sendResult != AVERROR(EAGAIN)) {
-                emitError(QStringLiteral("Could not send packet to decoder: %1").arg(ffmpegError(sendResult)));
+                emitError(QmlScrubPlayer::Error::PacketSendFailed, QStringLiteral("Could not send packet to decoder: %1").arg(ffmpegError(sendResult)));
                 break;
             }
 
@@ -621,13 +619,13 @@ protected:
                     break;
                 }
                 if (receiveResult < 0) {
-                    emitError(QStringLiteral("Could not decode frame: %1").arg(ffmpegError(receiveResult)));
+                    emitError(QmlScrubPlayer::Error::DecodeFailed, QStringLiteral("Could not decode frame: %1").arg(ffmpegError(receiveResult)));
                     return;
                 }
 
                 AVFrame *displayFrame = softwareFrameForScaling(frame.get(), hardwareDecoder, transferFrame);
                 if (!displayFrame) {
-                    emitError(QStringLiteral("Could not transfer hardware frame"));
+                    emitError(QmlScrubPlayer::Error::HardwareTransferFailed, QStringLiteral("Could not transfer hardware frame"));
                     return;
                 }
 
@@ -778,7 +776,7 @@ private:
         const qint64 timestamp = av_rescale_q(positionMs, AVRational{1, 1000}, stream->time_base);
         const int flags = positionMs <= 0 ? AVSEEK_FLAG_BACKWARD : AVSEEK_FLAG_BACKWARD;
         if (const int result = av_seek_frame(format, stream->index, timestamp, flags); result < 0) {
-            emit errorReady(QStringLiteral("Could not seek: %1").arg(ffmpegError(result)));
+            emit errorReady(QmlScrubPlayer::Error::SeekFailed, QStringLiteral("Could not seek: %1").arg(ffmpegError(result)));
             return false;
         }
 
@@ -810,13 +808,13 @@ private:
         av_channel_layout_uninit(&outputLayout);
 
         if (setupResult < 0 || !rawResampler) {
-            emit errorReady(QStringLiteral("Could not allocate audio resampler"));
+            emit errorReady(QmlScrubPlayer::Error::AudioInitializationFailed, QStringLiteral("Could not allocate audio resampler"));
             return false;
         }
 
         resampler.reset(rawResampler);
         if (const int result = swr_init(resampler.get()); result < 0) {
-            emit errorReady(QStringLiteral("Could not initialize audio resampler: %1").arg(ffmpegError(result)));
+            emit errorReady(QmlScrubPlayer::Error::AudioInitializationFailed, QStringLiteral("Could not initialize audio resampler: %1").arg(ffmpegError(result)));
             return false;
         }
 
@@ -826,7 +824,7 @@ private:
         format.setSampleFormat(QAudioFormat::Int16);
 
         if (!format.isValid()) {
-            emit errorReady(QStringLiteral("Invalid audio format"));
+            emit errorReady(QmlScrubPlayer::Error::InvalidAudioFormat, QStringLiteral("Invalid audio format"));
             return false;
         }
 
@@ -842,7 +840,7 @@ private:
     {
         const int sendResult = avcodec_send_packet(audioCodecContext, packet);
         if (sendResult < 0 && sendResult != AVERROR(EAGAIN)) {
-            emit errorReady(QStringLiteral("Could not send audio packet: %1").arg(ffmpegError(sendResult)));
+            emit errorReady(QmlScrubPlayer::Error::PacketSendFailed, QStringLiteral("Could not send audio packet: %1").arg(ffmpegError(sendResult)));
             return;
         }
 
@@ -852,7 +850,7 @@ private:
                 break;
             }
             if (receiveResult < 0) {
-                emit errorReady(QStringLiteral("Could not decode audio frame: %1").arg(ffmpegError(receiveResult)));
+                emit errorReady(QmlScrubPlayer::Error::DecodeFailed, QStringLiteral("Could not decode audio frame: %1").arg(ffmpegError(receiveResult)));
                 break;
             }
 
@@ -932,7 +930,7 @@ private:
             nullptr));
 
         if (!sws) {
-            emitError(QStringLiteral("Could not create video scaler"));
+            emitError(QmlScrubPlayer::Error::ScalerCreationFailed, QStringLiteral("Could not create video scaler"));
             return false;
         }
 
@@ -994,9 +992,9 @@ private:
         }
     }
 
-    void emitError(const QString &message)
+    void emitError(QmlScrubPlayer::Error error, const QString &message)
     {
-        emit errorReady(message);
+        emit errorReady(error, message);
         emit statusReady(QmlScrubPlayer::Status::InvalidMedia);
     }
 
@@ -1049,10 +1047,22 @@ public:
 
     void requestPreview(qint64 position, qint64 generation)
     {
+        requestFrame(position, generation, false, 0);
+    }
+
+    void requestThumbnail(qint64 position, qint64 generation, int requestId)
+    {
+        requestFrame(position, generation, true, requestId);
+    }
+
+    void requestFrame(qint64 position, qint64 generation, bool thumbnail, int requestId)
+    {
         {
             QMutexLocker locker(&m_mutex);
             m_pendingPosition = std::max<qint64>(0, position);
             m_pendingGeneration = generation;
+            m_pendingThumbnail = thumbnail;
+            m_pendingRequestId = requestId;
             m_previewPending = true;
             m_waitCondition.wakeAll();
         }
@@ -1071,7 +1081,8 @@ public:
 
 signals:
     void frameReady(const QImage &image, qint64 position, qint64 generation);
-    void errorReady(const QString &message);
+    void thumbnailReady(const QImage &image, qint64 position, int requestId);
+    void errorReady(QmlScrubPlayer::Error error, const QString &message);
 
 protected:
     void run() override
@@ -1084,37 +1095,37 @@ protected:
         AVFormatContext *rawFormat = nullptr;
         const QByteArray input = urlToInput(source).toUtf8();
         if (const int result = avformat_open_input(&rawFormat, input.constData(), nullptr, nullptr); result < 0) {
-            emit errorReady(QStringLiteral("Could not open preview input: %1").arg(ffmpegError(result)));
+            emit errorReady(QmlScrubPlayer::Error::OpenFailed, QStringLiteral("Could not open preview input: %1").arg(ffmpegError(result)));
             return;
         }
         FormatContextPtr format(rawFormat);
 
         if (const int result = avformat_find_stream_info(format.get(), nullptr); result < 0) {
-            emit errorReady(QStringLiteral("Could not read preview stream info: %1").arg(ffmpegError(result)));
+            emit errorReady(QmlScrubPlayer::Error::StreamInfoFailed, QStringLiteral("Could not read preview stream info: %1").arg(ffmpegError(result)));
             return;
         }
 
         const int videoStream = av_find_best_stream(format.get(), AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
         if (videoStream < 0) {
-            emit errorReady(QStringLiteral("No preview video stream found"));
+            emit errorReady(QmlScrubPlayer::Error::NoVideoStream, QStringLiteral("No preview video stream found"));
             return;
         }
 
         AVStream *stream = format->streams[videoStream];
         const AVCodec *codec = avcodec_find_decoder(stream->codecpar->codec_id);
         if (!codec) {
-            emit errorReady(QStringLiteral("No preview decoder found"));
+            emit errorReady(QmlScrubPlayer::Error::DecoderNotFound, QStringLiteral("No preview decoder found"));
             return;
         }
 
         CodecContextPtr codecContext(avcodec_alloc_context3(codec));
         if (!codecContext) {
-            emit errorReady(QStringLiteral("Could not allocate preview decoder context"));
+            emit errorReady(QmlScrubPlayer::Error::DecoderAllocationFailed, QStringLiteral("Could not allocate preview decoder context"));
             return;
         }
 
         if (const int result = avcodec_parameters_to_context(codecContext.get(), stream->codecpar); result < 0) {
-            emit errorReady(QStringLiteral("Could not copy preview codec parameters: %1").arg(ffmpegError(result)));
+            emit errorReady(QmlScrubPlayer::Error::CodecParametersFailed, QStringLiteral("Could not copy preview codec parameters: %1").arg(ffmpegError(result)));
             return;
         }
 
@@ -1124,7 +1135,7 @@ protected:
         configureHardwareDecoder(codec, codecContext.get(), hardwareDecoder);
 
         if (const int result = avcodec_open2(codecContext.get(), codec, nullptr); result < 0) {
-            emit errorReady(QStringLiteral("Could not open preview decoder: %1").arg(ffmpegError(result)));
+            emit errorReady(QmlScrubPlayer::Error::DecoderOpenFailed, QStringLiteral("Could not open preview decoder: %1").arg(ffmpegError(result)));
             return;
         }
 
@@ -1132,7 +1143,7 @@ protected:
         FramePtr frame(av_frame_alloc());
         FramePtr transferFrame(av_frame_alloc());
         if (!packet || !frame) {
-            emit errorReady(QStringLiteral("Could not allocate preview frame buffers"));
+            emit errorReady(QmlScrubPlayer::Error::FrameAllocationFailed, QStringLiteral("Could not allocate preview frame buffers"));
             return;
         }
 
@@ -1156,7 +1167,7 @@ protected:
                     break;
                 }
                 if (readResult < 0) {
-                    emit errorReady(QStringLiteral("Could not read preview frame: %1").arg(ffmpegError(readResult)));
+                    emit errorReady(QmlScrubPlayer::Error::ReadFailed, QStringLiteral("Could not read preview frame: %1").arg(ffmpegError(readResult)));
                     break;
                 }
 
@@ -1168,7 +1179,7 @@ protected:
                 const int sendResult = avcodec_send_packet(codecContext.get(), packet.get());
                 av_packet_unref(packet.get());
                 if (sendResult < 0 && sendResult != AVERROR(EAGAIN)) {
-                    emit errorReady(QStringLiteral("Could not send preview packet: %1").arg(ffmpegError(sendResult)));
+                    emit errorReady(QmlScrubPlayer::Error::PacketSendFailed, QStringLiteral("Could not send preview packet: %1").arg(ffmpegError(sendResult)));
                     break;
                 }
 
@@ -1178,19 +1189,25 @@ protected:
                         break;
                     }
                     if (receiveResult < 0) {
-                        emit errorReady(QStringLiteral("Could not decode preview frame: %1").arg(ffmpegError(receiveResult)));
+                        emit errorReady(QmlScrubPlayer::Error::DecodeFailed, QStringLiteral("Could not decode preview frame: %1").arg(ffmpegError(receiveResult)));
                         return;
                     }
 
                     AVFrame *displayFrame = softwareFrameForScaling(frame.get(), hardwareDecoder, transferFrame);
                     if (!displayFrame) {
-                        emit errorReady(QStringLiteral("Could not transfer preview hardware frame"));
+                        emit errorReady(QmlScrubPlayer::Error::HardwareTransferFailed, QStringLiteral("Could not transfer preview hardware frame"));
                         return;
                     }
 
                     const qint64 framePosition = timestampToMs(displayFrame->best_effort_timestamp, stream->time_base);
-                    if (!emitPreviewFrame(sws, displayFrame, framePosition, request.generation)) {
+                    QImage image;
+                    if (!renderPreviewFrame(sws, displayFrame, image)) {
                         return;
+                    }
+                    if (request.thumbnail) {
+                        emit thumbnailReady(image, framePosition, request.requestId);
+                    } else {
+                        emit frameReady(image, framePosition, request.generation);
                     }
                     av_frame_unref(frame.get());
                     emitted = true;
@@ -1209,6 +1226,8 @@ private:
     {
         qint64 position = 0;
         qint64 generation = 0;
+        bool thumbnail = false;
+        int requestId = 0;
     };
 
     QUrl currentSource()
@@ -1230,7 +1249,7 @@ private:
             m_waitCondition.wait(&m_mutex);
         }
 
-        PreviewRequest request{m_pendingPosition, m_pendingGeneration};
+        PreviewRequest request{m_pendingPosition, m_pendingGeneration, m_pendingThumbnail, m_pendingRequestId};
         m_previewPending = false;
         return request;
     }
@@ -1256,7 +1275,7 @@ private:
     {
         const qint64 timestamp = av_rescale_q(positionMs, AVRational{1, 1000}, stream->time_base);
         if (const int result = av_seek_frame(format, stream->index, timestamp, AVSEEK_FLAG_BACKWARD); result < 0) {
-            emit errorReady(QStringLiteral("Could not preview seek: %1").arg(ffmpegError(result)));
+            emit errorReady(QmlScrubPlayer::Error::SeekFailed, QStringLiteral("Could not preview seek: %1").arg(ffmpegError(result)));
             return false;
         }
 
@@ -1265,7 +1284,7 @@ private:
         return true;
     }
 
-    bool emitPreviewFrame(SwsContextPtr &sws, AVFrame *frame, qint64 framePosition, qint64 generation)
+    bool renderPreviewFrame(SwsContextPtr &sws, AVFrame *frame, QImage &image)
     {
         int targetWidth = frame->width;
         int targetHeight = frame->height;
@@ -1290,15 +1309,14 @@ private:
             nullptr));
 
         if (!sws) {
-            emit errorReady(QStringLiteral("Could not create preview scaler"));
+            emit errorReady(QmlScrubPlayer::Error::ScalerCreationFailed, QStringLiteral("Could not create preview scaler"));
             return false;
         }
 
-        QImage image(targetWidth, targetHeight, QImage::Format_RGBA8888);
+        image = QImage(targetWidth, targetHeight, QImage::Format_RGBA8888);
         uint8_t *dstData[] = {image.bits()};
         int dstLinesize[] = {static_cast<int>(image.bytesPerLine())};
         sws_scale(sws.get(), frame->data, frame->linesize, 0, frame->height, dstData, dstLinesize);
-        emit frameReady(image, framePosition, generation);
         return true;
     }
 
@@ -1315,6 +1333,8 @@ private:
     bool m_previewPending = false;
     qint64 m_pendingPosition = 0;
     qint64 m_pendingGeneration = 0;
+    bool m_pendingThumbnail = false;
+    int m_pendingRequestId = 0;
     int m_previewMaximumDimension = defaultSeekPreviewMaximumDimension;
 };
 
@@ -1359,6 +1379,11 @@ void QmlScrubPlayer::setSource(const QUrl &source)
     m_frameGenerationCounter = 0;
     m_currentFrameImage = QImage();
     m_previewFrameCache.clear();
+    emit previewCacheChanged();
+    if (!m_markers.isEmpty()) {
+        m_markers.clear();
+        emit markersChanged();
+    }
     setDuration(0);
     resetMediaInfo();
     setError(Error::NoError, QString());
@@ -1658,6 +1683,40 @@ void QmlScrubPlayer::setSeekPreviewMaximumDimension(int seekPreviewMaximumDimens
     emit seekPreviewMaximumDimensionChanged();
 }
 
+int QmlScrubPlayer::previewCacheSize() const
+{
+    return m_previewFrameCache.size();
+}
+
+int QmlScrubPlayer::previewCacheLimit() const
+{
+    return m_previewCacheLimit;
+}
+
+void QmlScrubPlayer::setPreviewCacheLimit(int previewCacheLimit)
+{
+    const int clampedLimit = std::clamp(previewCacheLimit, 0, 1024);
+    if (m_previewCacheLimit == clampedLimit) {
+        return;
+    }
+
+    m_previewCacheLimit = clampedLimit;
+    if (trimPreviewCache()) {
+        emit previewCacheChanged();
+    }
+    emit previewCacheLimitChanged();
+}
+
+QVariantList QmlScrubPlayer::markers() const
+{
+    QVariantList markerList;
+    markerList.reserve(m_markers.size());
+    for (qint64 marker : m_markers) {
+        markerList.append(marker);
+    }
+    return markerList;
+}
+
 QmlScrubPlayer::PlaybackState QmlScrubPlayer::playbackState() const
 {
     return m_playbackState;
@@ -1751,6 +1810,35 @@ void QmlScrubPlayer::seekToFrame(qint64 frame)
     seek(frameToPosition(frame));
 }
 
+void QmlScrubPlayer::setLoopRange(qint64 loopStart, qint64 loopEnd)
+{
+    const qint64 clampedLoopStart = clampPosition(loopStart);
+    qint64 clampedLoopEnd = loopEnd <= 0 ? 0 : clampPosition(loopEnd);
+    if (clampedLoopEnd > 0 && clampedLoopEnd <= clampedLoopStart) {
+        clampedLoopEnd = 0;
+    }
+    if (m_loopStart == clampedLoopStart && m_loopEnd == clampedLoopEnd) {
+        return;
+    }
+
+    m_loopStart = clampedLoopStart;
+    m_loopEnd = clampedLoopEnd;
+    if (m_decoder) {
+        m_decoder->setLoopRange(m_loopStart, m_loopEnd);
+    }
+    emit loopRangeChanged();
+}
+
+void QmlScrubPlayer::setLoopRangeForFrames(qint64 loopStartFrame, qint64 loopEndFrame)
+{
+    setLoopRange(frameToPosition(loopStartFrame), frameToPosition(loopEndFrame));
+}
+
+void QmlScrubPlayer::clearLoopRange()
+{
+    setLoopRange(0, 0);
+}
+
 void QmlScrubPlayer::previewSeek(qint64 position)
 {
     const qint64 clampedPosition = clampPosition(position);
@@ -1825,6 +1913,80 @@ QImage QmlScrubPlayer::captureFrame() const
     return m_currentFrameImage;
 }
 
+void QmlScrubPlayer::clearPreviewCache()
+{
+    if (m_previewFrameCache.isEmpty()) {
+        return;
+    }
+
+    m_previewFrameCache.clear();
+    emit previewCacheChanged();
+}
+
+void QmlScrubPlayer::requestThumbnail(qint64 position, int requestId)
+{
+    const qint64 clampedPosition = clampPosition(position);
+    if (!m_previewDecoder) {
+        recreateDecoder();
+    }
+    if (!m_previewDecoder) {
+        return;
+    }
+
+    const qint64 generation = ++m_frameGenerationCounter;
+    const int effectiveRequestId = requestId != 0 ? requestId : ++m_thumbnailRequestCounter;
+    m_previewDecoder->requestThumbnail(clampedPosition, generation, effectiveRequestId);
+}
+
+void QmlScrubPlayer::requestThumbnailForFrame(qint64 frame, int requestId)
+{
+    requestThumbnail(frameToPosition(frame), requestId);
+}
+
+void QmlScrubPlayer::addMarker(qint64 position)
+{
+    const qint64 clampedPosition = clampPosition(position);
+    const auto insertAt = std::lower_bound(m_markers.begin(), m_markers.end(), clampedPosition);
+    if (insertAt != m_markers.end() && *insertAt == clampedPosition) {
+        return;
+    }
+
+    m_markers.insert(insertAt, clampedPosition);
+    emit markersChanged();
+}
+
+void QmlScrubPlayer::addMarkerForFrame(qint64 frame)
+{
+    addMarker(frameToPosition(frame));
+}
+
+void QmlScrubPlayer::removeMarker(qint64 position)
+{
+    const qint64 clampedPosition = clampPosition(position);
+    const auto marker = std::lower_bound(m_markers.begin(), m_markers.end(), clampedPosition);
+    if (marker == m_markers.end() || *marker != clampedPosition) {
+        return;
+    }
+
+    m_markers.erase(marker);
+    emit markersChanged();
+}
+
+void QmlScrubPlayer::removeMarkerForFrame(qint64 frame)
+{
+    removeMarker(frameToPosition(frame));
+}
+
+void QmlScrubPlayer::clearMarkers()
+{
+    if (m_markers.isEmpty()) {
+        return;
+    }
+
+    m_markers.clear();
+    emit markersChanged();
+}
+
 void QmlScrubPlayer::recreateDecoder()
 {
     if (m_previewDecoder) {
@@ -1857,7 +2019,7 @@ void QmlScrubPlayer::recreateDecoder()
     connect(m_decoder, &QmlScrubDecoder::durationReady, this, &QmlScrubPlayer::setDuration);
     connect(m_decoder, &QmlScrubDecoder::mediaInfoReady, this, &QmlScrubPlayer::setMediaInfo);
     connect(m_decoder, &QmlScrubDecoder::statusReady, this, &QmlScrubPlayer::setStatus);
-    connect(m_decoder, &QmlScrubDecoder::errorReady, this, &QmlScrubPlayer::setErrorString);
+    connect(m_decoder, &QmlScrubDecoder::errorReady, this, &QmlScrubPlayer::setError);
     connect(m_decoder, &QmlScrubDecoder::playbackEnded, this, [this] {
         setPlaying(false);
         m_playbackState = PlaybackState::Stopped;
@@ -1880,17 +2042,22 @@ void QmlScrubPlayer::recreateDecoder()
     m_previewDecoder = new QmlScrubPreviewDecoder(this);
     m_previewDecoder->setSource(m_source);
     m_previewDecoder->setPreviewMaximumDimension(m_seekPreviewMaximumDimension);
-    connect(m_previewDecoder, &QmlScrubPreviewDecoder::errorReady, this, &QmlScrubPlayer::setErrorString);
+    connect(m_previewDecoder, &QmlScrubPreviewDecoder::errorReady, this, &QmlScrubPlayer::setError);
+    connect(m_previewDecoder, &QmlScrubPreviewDecoder::thumbnailReady, this, &QmlScrubPlayer::thumbnailReady);
     connect(m_previewDecoder, &QmlScrubPreviewDecoder::frameReady, this, [this](const QImage &image, qint64 position, qint64 generation) {
         if (generation < m_expectedFrameGeneration) {
             return;
         }
         setPositionFromDecoder(position);
         m_currentFrameImage = image;
-        if (m_previewFrameCache.size() >= previewFrameCacheLimit) {
-            m_previewFrameCache.erase(m_previewFrameCache.begin());
+        if (m_previewCacheLimit > 0) {
+            const bool hadCachedFrame = m_previewFrameCache.contains(position);
+            m_previewFrameCache.insert(position, image);
+            const bool trimmed = trimPreviewCache();
+            if (!hadCachedFrame || trimmed) {
+                emit previewCacheChanged();
+            }
         }
-        m_previewFrameCache.insert(position, image);
         if (m_videoSink) {
             m_videoSink->setVideoFrame(QVideoFrame(image));
         }
@@ -2038,6 +2205,16 @@ QString QmlScrubPlayer::formatTimecode(qint64 position) const
         .arg(minutes, 2, 10, QLatin1Char('0'))
         .arg(seconds, 2, 10, QLatin1Char('0'))
         .arg(std::max<qint64>(0, frame), 2, 10, QLatin1Char('0'));
+}
+
+bool QmlScrubPlayer::trimPreviewCache()
+{
+    bool trimmed = false;
+    while (m_previewFrameCache.size() > m_previewCacheLimit) {
+        m_previewFrameCache.erase(m_previewFrameCache.begin());
+        trimmed = true;
+    }
+    return trimmed;
 }
 
 void QmlScrubPlayer::setStatus(Status status)

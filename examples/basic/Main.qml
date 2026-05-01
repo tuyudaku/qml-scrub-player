@@ -110,12 +110,10 @@ ApplicationWindow {
                     checkable: true
                     onToggled: {
                         if (checked) {
-                            player.loopStart = player.position
-                            player.loopEnd = Math.min(player.duration, player.position + 2000)
+                            player.setLoopRange(player.position, Math.min(player.duration, player.position + 2000))
                             player.loops = -1
                         } else {
-                            player.loopStart = 0
-                            player.loopEnd = 0
+                            player.clearLoopRange()
                             player.loops = 1
                         }
                     }
@@ -141,6 +139,7 @@ ApplicationWindow {
                         ? player.errorString
                         : player.currentFrame + "/" + Math.max(player.frameCount - 1, 0)
                           + "  " + player.timecode
+                          + "  cache " + player.previewCacheSize + "/" + player.previewCacheLimit
                           + "  " + player.videoCodecName
                           + (player.hasAudio ? "  " + player.audioCodecName : "")
                     width: 220

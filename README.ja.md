@@ -13,7 +13,11 @@ FFmpeg で動画をデコードし、Qt Quick には `QVideoSink` 経由でフ�
 - 再生操作: `play()`, `pause()`, `stop()`, `seek(position)`, `seekToFrame(frame)`, `stepForward(frames)`, `stepBackward(frames)`
 - フレーム/時刻変換: `positionForFrame(frame)`, `frameForPosition(position)`, `timecodeForFrame(frame)`, `timecodeForPosition(position)`
 - ドラッグ中の軽量プレビュー用: `previewSeek(position)`, `previewSeekToFrame(frame)`
+- プレビューキャッシュ制御: `previewCacheSize`, `previewCacheLimit`, `clearPreviewCache()`
+- サムネイル生成: `requestThumbnail()`, `requestThumbnailForFrame()`, `thumbnailReady`
+- タイムラインマーカー: `markers`, `addMarker()`, `removeMarker()`, `clearMarkers()`
 - 範囲ループ: `loopStart`, `loopEnd`, `loops`
+- ループ範囲ヘルパー: `setLoopRange()`, `setLoopRangeForFrames()`, `clearLoopRange()`
 - 現在フレーム画像の取得: `captureFrame()`
 - 専用のプレビューデコーダによるスクラブ操作
 - キーフレームインデックスを使った高速プレビューシーク
@@ -170,7 +174,7 @@ C++ から参照できる主な状態は `source()`, `isPlaying()`, `duration()`
 `pixelFormat()`, `audioFormat()`, `isSeekable()`, `hasAudio()`, `audioChannelCount()`,
 `audioSampleRate()`, `hasVideo()`, `canPlay()`, `canPause()`, `canSeek()`,
 `volume()`, `isMuted()`, `playbackState()`, `status()`, `error()`, `errorString()` です。操作メソッドも QML と同じく
-`play()`, `pause()`, `stop()`, `seek()`, `seekToFrame()`, `stepForward()`, `stepBackward()`,
+`play()`, `pause()`, `stop()`, `seek()`, `seekToFrame()`, `setLoopRange()`, `setLoopRangeForFrames()`, `clearLoopRange()`, `stepForward()`, `stepBackward()`,
 `positionForFrame()`, `frameForPosition()`, `timecodeForFrame()`, `timecodeForPosition()`, `captureFrame()`, `previewSeek()`, `previewSeekToFrame()`,
 `endPreviewSeek()`, `endPreviewSeekToFrame()` を利用できます。
 
@@ -181,11 +185,26 @@ C++ から参照できる主な状態は `source()`, `isPlaying()`, `duration()`
 | 再生 | `play()`, `pause()`, `stop()`, `playing`, `playbackState`, `canPlay`, `canPause` |
 | タイムライン | `duration`, `position`, `remainingTime`, `progress`, `timecode`, `durationTimecode`, `seek()`, `canSeek`, `seekable` |
 | フレーム | `currentFrame`, `frameCount`, `seekToFrame()`, `stepForward()`, `stepBackward()`, `positionForFrame()`, `frameForPosition()`, `timecodeForFrame()`, `timecodeForPosition()` |
-| スクラブ | `previewSeek()`, `previewSeekToFrame()`, `endPreviewSeek()`, `endPreviewSeekToFrame()` |
+| スクラブ | `previewSeek()`, `previewSeekToFrame()`, `endPreviewSeek()`, `endPreviewSeekToFrame()`, `previewCacheSize`, `previewCacheLimit`, `clearPreviewCache()` |
+| サムネイル | `requestThumbnail()`, `requestThumbnailForFrame()`, `thumbnailReady` |
+| マーカー | `markers`, `addMarker()`, `addMarkerForFrame()`, `removeMarker()`, `removeMarkerForFrame()`, `clearMarkers()` |
 | メディア | `videoSize`, `aspectRatio`, `frameRate`, `videoCodecName`, `audioCodecName`, `pixelFormat`, `audioFormat`, `hasAudio`, `hasVideo` |
-| ループ | `loops`, `loopStart`, `loopEnd` |
+| ループ | `loops`, `loopStart`, `loopEnd`, `setLoopRange()`, `setLoopRangeForFrames()`, `clearLoopRange()` |
 | キャプチャ | `captureFrame()` |
-| エラー | `status`, `error`, `errorString` |
+| エラー | `status`, `error`, `errorString`; `error` は open、stream-info、decoder、seek、read、decode、scaler、audio、media 失敗を区別 |
+
+## 使い分けメモ
+
+`previewCacheLimit` はスクラブプレビュー用フレームの保持数を制限します。UI 側で不要に
+なった場合は `clearPreviewCache()` で明示的に破棄できます。`requestThumbnail()` と
+`requestThumbnailForFrame()` は表示中の再生位置を変えずに画像を生成します。UI 側で
+リクエストと結果を対応させたい場合は request id を渡し、省略した場合はプレイヤーが
+自動採番します。
+
+マーカーはタイムライン表示、レビュー箇所、戻りたい位置のための source 単位の
+ミリ秒位置です。値はソート・重複排除され、新しい source を設定するとクリアされます。
+`setLoopRange()` と `setLoopRangeForFrames()` はループ開始/終了を一度に更新し、
+`clearLoopRange()` は範囲ループを無効化します。
 
 ## 補足
 
