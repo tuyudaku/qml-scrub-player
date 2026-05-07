@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.21)
 project(QMLScrubPlayer
     VERSION 0.1.0
     DESCRIPTION "A small Qt 6 QML video playback module"
-    HOMEPAGE_URL "https://github.com/yourname/QMLScrubPlayer"
+    HOMEPAGE_URL "https://github.com/tuyudaku/qml-scrub-player"
     LANGUAGES CXX
 )
 
@@ -16,63 +16,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
-find_package(PkgConfig)
 
 find_package(Qt6 6.10 REQUIRED COMPONENTS Core Qml Quick Multimedia)
-
-if(PkgConfig_FOUND)
-    pkg_check_modules(FFMPEG IMPORTED_TARGET
-        libavformat
-        libavcodec
-        libavutil
-        libswscale
-        libswresample
-    )
-endif()
-
-if(NOT TARGET PkgConfig::FFMPEG)
-    find_package(FFMPEG QUIET COMPONENTS avformat avcodec avutil swscale swresample)
-    if(TARGET FFMPEG::avformat AND TARGET FFMPEG::avcodec AND TARGET FFMPEG::avutil
-        AND TARGET FFMPEG::swscale AND TARGET FFMPEG::swresample)
-        add_library(QMLScrubPlayerFFmpeg INTERFACE)
-        add_library(PkgConfig::FFMPEG ALIAS QMLScrubPlayerFFmpeg)
-        target_link_libraries(QMLScrubPlayerFFmpeg INTERFACE
-            FFMPEG::avformat
-            FFMPEG::avcodec
-            FFMPEG::avutil
-            FFMPEG::swscale
-            FFMPEG::swresample
-        )
-    endif()
-endif()
-
-if(NOT TARGET PkgConfig::FFMPEG)
-    find_path(FFMPEG_INCLUDE_DIR
-        NAMES libavformat/avformat.h
-        HINTS "${FFMPEG_ROOT}/include"
-    )
-    find_library(FFMPEG_AVFORMAT_LIBRARY avformat HINTS "${FFMPEG_ROOT}/lib")
-    find_library(FFMPEG_AVCODEC_LIBRARY avcodec HINTS "${FFMPEG_ROOT}/lib")
-    find_library(FFMPEG_AVUTIL_LIBRARY avutil HINTS "${FFMPEG_ROOT}/lib")
-    find_library(FFMPEG_SWSCALE_LIBRARY swscale HINTS "${FFMPEG_ROOT}/lib")
-    find_library(FFMPEG_SWRESAMPLE_LIBRARY swresample HINTS "${FFMPEG_ROOT}/lib")
-
-    if(NOT FFMPEG_INCLUDE_DIR OR NOT FFMPEG_AVFORMAT_LIBRARY OR NOT FFMPEG_AVCODEC_LIBRARY
-        OR NOT FFMPEG_AVUTIL_LIBRARY OR NOT FFMPEG_SWSCALE_LIBRARY OR NOT FFMPEG_SWRESAMPLE_LIBRARY)
-        message(FATAL_ERROR "FFmpeg was not found. Install FFmpeg development libraries or set FFMPEG_ROOT.")
-    endif()
-
-    add_library(QMLScrubPlayerFFmpeg INTERFACE)
-    add_library(PkgConfig::FFMPEG ALIAS QMLScrubPlayerFFmpeg)
-    target_include_directories(QMLScrubPlayerFFmpeg INTERFACE "${FFMPEG_INCLUDE_DIR}")
-    target_link_libraries(QMLScrubPlayerFFmpeg INTERFACE
-        "${FFMPEG_AVFORMAT_LIBRARY}"
-        "${FFMPEG_AVCODEC_LIBRARY}"
-        "${FFMPEG_AVUTIL_LIBRARY}"
-        "${FFMPEG_SWSCALE_LIBRARY}"
-        "${FFMPEG_SWRESAMPLE_LIBRARY}"
-    )
-endif()
+include(cmake/QMLScrubPlayerFindFFmpeg.cmake)
 
 qt_standard_project_setup(REQUIRES 6.10)
 
@@ -106,6 +52,7 @@ install(
     FILES
         "${CMAKE_CURRENT_BINARY_DIR}/QMLScrubPlayerConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/QMLScrubPlayerConfigVersion.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/QMLScrubPlayerFindFFmpeg.cmake"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/QMLScrubPlayer"
 )
 
@@ -114,3 +61,31 @@ install(
     NAMESPACE QMLScrubPlayer::
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/QMLScrubPlayer"
 )
+
+install(
+    FILES README.md README.ja.md LICENSE
+    DESTINATION "${CMAKE_INSTALL_DOCDIR}"
+)
+
+set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
+set(CPACK_PACKAGE_VENDOR "tuyudaku")
+set(CPACK_PACKAGE_CONTACT "https://github.com/tuyudaku/qml-scrub-player")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "${PROJECT_DESCRIPTION}")
+set(CPACK_PACKAGE_HOMEPAGE_URL "${PROJECT_HOMEPAGE_URL}")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
+set(CPACK_SOURCE_GENERATOR "TGZ;ZIP")
+set(CPACK_SOURCE_IGNORE_FILES
+    "/\\\\.git/"
+    "/build[^/]*/"
+    "/\\\\.DS_Store$"
+)
+
+if(WIN32)
+    set(CPACK_GENERATOR "ZIP")
+else()
+    set(CPACK_GENERATOR "TGZ")
+endif()
+
+include(CPack)

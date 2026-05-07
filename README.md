@@ -132,11 +132,38 @@ For responsive scrub bars, call `previewSeek(position)` while dragging and
 `endPreviewSeek(position)` when the user releases the handle. Frame-based UIs
 can use `previewSeekToFrame(frame)` and `endPreviewSeekToFrame(frame)`.
 
+## Use With FetchContent
+
+FetchContent is the recommended way to consume QMLScrubPlayer from another CMake
+project while the library is still evolving.
+
+```cmake
+include(FetchContent)
+
+FetchContent_Declare(
+    QMLScrubPlayer
+    GIT_REPOSITORY https://github.com/tuyudaku/qml-scrub-player.git
+    GIT_TAG        v0.1.0 # Prefer a release tag or pinned commit.
+)
+
+FetchContent_MakeAvailable(QMLScrubPlayer)
+
+target_link_libraries(my_app PRIVATE QMLScrubPlayer::QMLScrubPlayer)
+```
+
+Qt must still be discoverable through `CMAKE_PREFIX_PATH`, and FFmpeg must be
+discoverable through pkg-config, `FFMPEG_ROOT`, or another CMake package route.
+If your application imports `QMLScrubPlayer` from QML at runtime, make sure the
+generated or installed QML import directory is visible to Qt.
+
 ## Install
 
 ```sh
 cmake --install build --prefix /path/to/install
 ```
+
+The install tree includes the C++ library, public header, CMake package files,
+QML module metadata, and project documentation under the install prefix.
 
 Consumer projects can then use:
 

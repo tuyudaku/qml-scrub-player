@@ -39,6 +39,20 @@
     {
       "name": "vcpkg-linux-ci",
       "configurePreset": "vcpkg-linux-ci"
+    },
+    {
+      "name": "package",
+      "configurePreset": "default",
+      "targets": [
+        "package"
+      ]
+    },
+    {
+      "name": "vcpkg-package",
+      "configurePreset": "vcpkg",
+      "targets": [
+        "package"
+      ]
     }
   ]
 }

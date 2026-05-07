@@ -45,3 +45,18 @@ add_test(
 set_tests_properties(qmlscrubplayer_find_package
     PROPERTIES DEPENDS qmlscrubplayer_install_tree
 )
+
+add_test(
+    NAME qmlscrubplayer_verify_install_tree
+    COMMAND
+        "${CMAKE_COMMAND}"
+        "-DQMLSCRUBPLAYER_TEST_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/test-install"
+        "-DCMAKE_INSTALL_INCLUDEDIR=${CMAKE_INSTALL_INCLUDEDIR}"
+        "-DCMAKE_INSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}"
+        "-DCMAKE_INSTALL_DATAROOTDIR=${CMAKE_INSTALL_DATAROOTDIR}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/verify_install_tree.cmake"
+)
+
+set_tests_properties(qmlscrubplayer_verify_install_tree
+    PROPERTIES DEPENDS qmlscrubplayer_install_tree
+)
