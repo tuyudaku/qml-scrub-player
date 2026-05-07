@@ -122,11 +122,38 @@ Slider {
 }
 ```
 
+## FetchContent で利用する
+
+QMLScrubPlayer はまだ発展中のため、別の CMake プロジェクトから利用する場合は
+FetchContent を正式な推奨ルートとしています。
+
+```cmake
+include(FetchContent)
+
+FetchContent_Declare(
+    QMLScrubPlayer
+    GIT_REPOSITORY https://github.com/tuyudaku/qml-scrub-player.git
+    GIT_TAG        v0.1.0 # リリースタグまたは固定コミットを推奨
+)
+
+FetchContent_MakeAvailable(QMLScrubPlayer)
+
+target_link_libraries(my_app PRIVATE QMLScrubPlayer::QMLScrubPlayer)
+```
+
+Qt は `CMAKE_PREFIX_PATH` から見つかる必要があります。FFmpeg は pkg-config、
+`FFMPEG_ROOT`、または CMake package 経由で見つかるようにしてください。
+アプリケーション実行時に QML から `import QMLScrubPlayer` する場合は、生成済み
+またはインストール済みの QML import ディレクトリが Qt から見える必要があります。
+
 ## インストール
 
 ```sh
 cmake --install build --prefix /path/to/install
 ```
+
+インストール先には C++ ライブラリ、公開ヘッダ、CMake package ファイル、
+QML モジュールのメタデータ、プロジェクトドキュメントが含まれます。
 
 利用側の CMake:
 
